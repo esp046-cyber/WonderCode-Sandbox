@@ -6,3 +6,7 @@
 
 ## 1.0.0
 - Editor, validator, templates, tag converter, offline PWA.
+
+## 1.2.0
+- Language switch dialog, dialect mismatch badge, QuickScript<->C# syntax translator.
+- Unique tab names, close confirm + undo, iOS keyboard fix, welcome tour, update banner.
