@@ -29,3 +29,5 @@ li.error{border-color:#ff5370}li.warn{border-color:var(--am)}li.ok{border-color:
  body.dl #L,body.dr #R{transform:none}
  #scrim{position:fixed;inset:0;background:#0008;z-index:10}body.dl #scrim,body.dr #scrim{display:block}}
 @media(prefers-reduced-motion:reduce){aside{transition:none}}
+.sr{background:#0f2744;border-left:3px solid var(--cy);padding:6px 8px;margin:4px 0;font-size:12px;word-break:break-all}.sr b{color:var(--am);float:right}.sr select,.sr input[type=range]{width:100%;margin-top:4px}.sr input[type=checkbox]{width:22px;height:22px;vertical-align:middle}
+#plcDlg{width:min(94vw,760px);background:var(--panel);color:var(--tx);border:1px solid var(--cy);border-radius:8px}#plcDlg::backdrop{background:#000a}#plcOut{max-height:60dvh;overflow:auto;background:#06101f;padding:8px;font-size:12px;white-space:pre}
