@@ -1,27 +1,29 @@
-const $=s=>document.querySelector(s),ta=$('#code'),hl=$('#hl'),D0='{ Start here or pick a template }\n';
+const EXT={qs:'.scp',cs:'.aaScript',sql:'.sql'},$=s=>document.querySelector(s),ta=$('#code'),hl=$('#hl'),D0='{ Start here or pick a template }\n';
+let simId=null,simCode=null;
 let S=DB.get('state',{tabs:[{id:1,name:'script1',lang:'qs',code:D0,orig:D0}],cur:1});
 const cur=()=>S.tabs.find(t=>t.id===S.cur)||S.tabs[0],save=()=>{DB.set('state',S);$('#status').textContent='Saved '+new Date().toLocaleTimeString()};
 const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
 function highlight(){let h=esc(ta.value);
   h=h.replace(/(\/\/.*|\{[^}]*\})|("[^"]*"|'[^']*')|\b(IF|THEN|ELSE|ENDIF|WHILE|ENDWHILE|FOR|TO|NEXT|DIM|AS|SELECT|FROM|WHERE|GROUP BY|ORDER BY|AND|OR|NOT|double|int|bool|var|if|else|while|return|new|Math|Me|Show|Hide)\b|\b(\d+\.?\d*)\b/g,
-   (m,c,s,k,n)=>c?`<span class=c>${c}</span>`:s?`<span class=s>${s}</span>`:k?`<span class=k>${k}</span>`:`<span class=n>${n}</span>`);hl.innerHTML=h+'\n'}
+   (m,c,s,k,n)=>c?`<span class=c>${c}</span>`:s?`<span class=s>${s}</span>`:k?`<span class=k>${k}</span>`:`<span class=n>${n}</span>`);hl.innerHTML=h+'\n';$('#gutter').textContent=Array.from({length:ta.value.split('\n').length},(_,i)=>i+1).join('\n')}
 function render(){const t=cur();$('#tabs').innerHTML='';
   S.tabs.forEach(x=>{const d=document.createElement('div');d.className='tab'+(x.id===t.id?' on':'');d.textContent=x.name;
     const c=document.createElement('i');c.textContent='×';c.setAttribute('aria-label','Close '+x.name);c.onclick=e=>{e.stopPropagation();closeTab(x.id)};
     d.append(c);d.onclick=()=>{S.cur=x.id;render()};d.ondblclick=()=>{const n=prompt('Rename tab',x.name);if(n){x.name=uniq(n,x.id);render();save()}};$('#tabs').append(d)});
-  ta.value=t.code;$('#lang').value=t.lang;highlight();check()}
+  ta.value=t.code;$('#lang').value=t.lang;highlight();check();
+  $('#exp option[value=script]').textContent='This tab (.'+EXT[t.lang].slice(1)+')';
+  if(typeof initSimulator==='function'&&(simId!==S.cur||simCode!==t.code)){simId=S.cur;simCode=t.code;initSimulator()}}
 function check(){const t=cur(),r=validate(t.code,t.lang),d=detectDialect(t.code,t.lang);
   $('#badge').hidden=!d;$('#badge').textContent=d?'⚠ '+d:'';
   $('#issues').innerHTML=r.length?r.map(i=>`<li class="${i.sev}">Line ${i.line}: ${esc(i.msg)}</li>`).join(''):'<li class="ok">No issues found.</li>';
-  const tg=TagTools.extract(t.code);$('#tags').innerHTML=tg.length?tg.map(x=>`<li>${esc(x)}</li>`).join(''):'<li>No tags detected.</li>'}
+  const tg=TagTools.extract(t.code,t.lang);$('#tags').innerHTML=tg.length?tg.map(x=>`<li><span class="badge ${x.mode==='Write'?'write':'read'}">${x.mode==='Write'?'OUT':'IN'}</span>${esc(x.name)} <small>${x.type}</small></li>`).join(''):'<li>No tags detected.</li>'}
 let timer;ta.oninput=()=>{cur().code=ta.value;highlight();clearTimeout(timer);timer=setTimeout(()=>{check();save()},400)};
-ta.onscroll=()=>{hl.scrollTop=ta.scrollTop;hl.scrollLeft=ta.scrollLeft};
+ta.onscroll=()=>{hl.scrollTop=$('#gutter').scrollTop=ta.scrollTop;hl.scrollLeft=ta.scrollLeft};
 ta.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();document.execCommand('insertText',false,'  ')}};
 $('#new').onclick=()=>addTab('script'+(S.tabs.length+1),'qs','');
 $('#val').onclick=check;
-$('#toSP').onclick=()=>{cur().code=TagTools.toSP(cur().code);render();save()};
+$('#toSP').onclick=()=>{cur().code=TagTools.toSP(cur().code,cur().lang);render();save()};
 $('#toIT').onclick=()=>{cur().code=TagTools.toInTouch(cur().code);render();save()};
-$('#exp').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));a.download='wondercode-export.json';a.click()};
 $('#imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;const x=await f.text();
   try{const j=JSON.parse(x);if(j.tabs){S=j;render();save()}else throw 0}catch{addTab(f.name,'qs',x)}};
 const tpl=$('#tpl');let g='';TEMPLATES.forEach(t=>{if(t.g!==g){g=t.g;const s=document.createElement('small');s.textContent=g;tpl.append(s)}
@@ -43,3 +45,11 @@ W.addEventListener('close',()=>{clr();try{localStorage.setItem('wc_visited','1')
 $('#tour').onclick=()=>{clr();W.showModal();step(0)};
 render();
 try{if(!localStorage.getItem('wc_visited'))$('#tour').click()}catch{}
+
+// Downloads: PLC export (.scl / .st / _ModbusMap.csv), full backup and native script export
+const fname=t=>t.name.replace(/[\\/:*?"<>|]+/g,'_').trim()||'script';
+function dl(name,text,mime){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:mime}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+$('#plcDl').onclick=()=>{const t=cur(),k=$('#plcT').value,r=PLC.convert(t.code,t.lang,k);
+  if(k==='csv')dl(fname(t)+'_ModbusMap.csv',r.text.replace(/\n/g,'\r\n'),'text/csv;charset=utf-8');else dl(fname(t)+'.'+k,r.text,'text/plain')};
+$('#exp').onchange=e=>{const t=cur(),v=e.target.value;e.target.value='';
+  if(v==='json')dl('wondercode-export.json',JSON.stringify(S,null,2),'application/json');else if(v==='script')dl(fname(t)+EXT[t.lang],t.code,'text/plain')};
