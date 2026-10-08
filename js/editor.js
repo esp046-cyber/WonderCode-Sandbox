@@ -8,11 +8,11 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});})();
 
 // ---- Simulation engine: converts QuickScript / C# to JS and runs it against a tag store ----
 const Sim=(()=>{
-  const KW=new Set('IF THEN ELSE ENDIF AND OR NOT WHILE ENDWHILE DIM AS INTEGER REAL DISCRETE MESSAGE DOUBLE INT BOOL VAR FLOAT MATH TRUE FALSE LOGMESSAGE INTEGERROUND NULL RETURN'.split(' '));
+  const KW=new Set('IF THEN ELSE ENDIF AND OR NOT WHILE ENDWHILE DIM AS INTEGER REAL DISCRETE MESSAGE DOUBLE INT BOOL VAR FLOAT MATH TRUE FALSE LOGMESSAGE INTEGERROUND NULL RETURN STRING DECIMAL LONG CONSOLE SYSTEM SHOW HIDE SHOWWINDOW INFOAPPACTIVE HTGETTIME WSOPTICAL FOR TO NEXT DO NEW'.split(' '));
   const strip=(c,l)=>(l==='qs'?c.replace(/\{[^}]*\}/g,' '):c).replace(/\/\/.*/g,' ').replace(/\bMe\./g,'');
   function analyze(code,lang){
     const c=strip(code,lang).replace(/"[^"]*"/g,'""'),loc=new Set,tags=[];
-    c.replace(/\b(?:DIM|double|int|bool|var|float)\s+(\w+)/gi,(m,n)=>loc.add(n));
+    c.replace(/\b(?:DIM|double|int|bool|var|float|string|decimal|long)\s+(\w+)/gi,(m,n)=>loc.add(n));
     c.replace(/(?<![\w.])[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*/g,m=>{const f=m.split('.')[0];if(!KW.has(f.toUpperCase())&&!loc.has(f)&&!tags.includes(m))tags.push(m)});
     const w=lang==='qs'?c.replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi,(m,x)=>'IF'+x.replace(/=/g,'~')+'THEN'):c;
     const outputs=new Set(tags.filter(t=>new RegExp('(?<![\\w.])'+t.replace(/\./g,'\\.')+'\\s*(?::=|[-+]=|=(?!=))').test(w)));
@@ -25,43 +25,49 @@ const Sim=(()=>{
       .replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi,(m,x)=>'if('+x.replace(/(?<![<>!=])=(?!=)/g,'==')+'){').replace(/\bELSE\b/gi,'}else{').replace(/\bENDIF\b\s*;?/gi,'}')
       .replace(/\bDIM\s+(\w+)\s+AS\s+\w+/gi,'let $1');
     const M={Pow:'pow',Max:'max',Min:'min',Abs:'abs',Sign:'sign',Round:'round',Floor:'floor',Ceiling:'ceil',Sqrt:'sqrt'};
-    return c.replace(/\b(?:double|int|bool|float)\s+(\w+)/g,'let $1').replace(/Math\.(Pow|Max|Min|Abs|Sign|Round|Floor|Ceiling|Sqrt)\b/g,(m,n)=>'Math.'+M[n]);
+    return c.replace(/\b(?:double|int|bool|float|string|decimal|long)\s+(\w+)/g,'let $1').replace(/Math\.(Pow|Max|Min|Abs|Sign|Round|Floor|Ceiling|Sqrt)\b/g,(m,n)=>'Math.'+M[n]);
   }
   return {analyze,toJS};
 })();
 
 // ---- Simulator UI: sliders, signal generators, fault toggles, timestamped log ----
 (function(){
-  const $=s=>document.querySelector(s),logEl=$('#log');let timer=null;
-  const L=m=>{logEl.textContent+=`[${new Date().toLocaleTimeString([],{hour12:false})}] ${m}\n`;const a=logEl.textContent.split('\n');if(a.length>250)logEl.textContent=a.slice(-200).join('\n');logEl.scrollTop=1e9};
+  const $=s=>document.querySelector(s),logEl=$('#log');let timer=null,sess=null,LOG=[],pend=null;
+  const show=()=>{logEl.textContent=LOG.join('\n');logEl.scrollTop=logEl.scrollHeight};
+  const L=m=>{LOG.push(`[${new Date().toLocaleTimeString([],{hour12:false})}] ${m}`);if(LOG.length>100)LOG.splice(0,LOG.length-100);show()};
+  const W=m=>{if(pend){L(pend);pend=null}L(m)};   // scan header is logged only when a scan changes something
   const stop=()=>{clearInterval(timer);timer=null;$('#run').textContent='Simulate'};
-  function start(){
-    const t=cur(),a=Sim.analyze(t.code,t.lang),errs=validate(t.code,t.lang).filter(i=>i.sev==='error');logEl.textContent='';
-    if(t.lang==='sql')return L('SQL scripts cannot be simulated.');
-    if(errs.length)return L(`Blocked: ${errs.length} validator error(s). Fix them first.`);
-    let fn;try{fn=new Function('T','LogMessage','IntegerRound',Sim.toJS(t.code,t.lang,a.tags))}catch(e){return L('Compile error: '+e.message)}
-    const V={},G={},ui={},box=$('#sim'),ins=a.tags.filter(x=>!a.outputs.has(x)),outs=a.tags.filter(x=>a.outputs.has(x));box.innerHTML='';
-    a.tags.forEach(x=>V[x]=0);ins.forEach(x=>{if(tagKind(x)==='analog')V[x]=50});
-    const T=new Proxy(V,{get:(o,k)=>o[k]??0,set:(o,k,v)=>{v=typeof v==='boolean'?+v:v;const f=typeof v==='number'?+v.toFixed(3):v;if(o[k]!==v)L(`WRITE Me.${k} = ${f}`);o[k]=v;return true}});
-    const row=(h)=>{const d=document.createElement('div');d.className='sr';d.innerHTML=h;box.append(d);return d};
-    ins.forEach(x=>{
-      if(tagKind(x)==='digital'){const d=row(`<label><input type="checkbox"> ${x} <small>(inject)</small></label>`);d.querySelector('input').onchange=e=>{V[x]=+e.target.checked;L(`INJECT Me.${x} = ${V[x]}`)}}
+  function build(){
+    const t=cur(),a=Sim.analyze(t.code,t.lang),box=$('#sim'),s={id:t.id,code:t.code,V:{},G:{},ui:{},n:0,fn:null,err:null};box.innerHTML='';
+    s.ins=a.tags.filter(x=>!a.outputs.has(x));s.outs=a.tags.filter(x=>a.outputs.has(x));
+    a.tags.forEach(x=>s.V[x]=0);s.ins.forEach(x=>{if(tagKind(x)==='analog')s.V[x]=50});
+    s.T=new Proxy(s.V,{get:(o,k)=>o[k]??0,set:(o,k,v)=>{v=typeof v==='boolean'?+v:v;const f=typeof v==='number'?+v.toFixed(3):v;if(o[k]!==v)W(`WRITE Me.${k} = ${f}`);o[k]=v;return true}});
+    if(t.lang==='sql'){s.err='SQL scripts cannot be simulated.';return s}
+    const er=validate(t.code,t.lang).filter(i=>i.sev==='error');
+    if(er.length)s.err=`Blocked: ${er.length} validator error(s). Fix them first.`;
+    else try{s.fn=new Function('T','LogMessage','IntegerRound',Sim.toJS(t.code,t.lang,a.tags))}catch(x){s.err='Compile error: '+x.message}
+    const row=h=>{const d=document.createElement('div');d.className='sr';d.innerHTML=h;box.append(d);return d};
+    s.ins.forEach(x=>{
+      if(tagKind(x)==='digital'){const d=row(`<label><input type="checkbox"> ${x} <small>(inject)</small></label>`);d.querySelector('input').onchange=e=>{s.V[x]=+e.target.checked;L(`INJECT Me.${x} = ${s.V[x]}`)}}
       else{const d=row(`<div>${x}<b>50</b></div><select aria-label="Generator"><option>Manual</option><option>Sine</option><option>Ramp</option></select><input type="range" min="0" max="100" step="0.5" value="50" aria-label="${x}">`);
-        const r=d.querySelector('input'),b=d.querySelector('b');r.oninput=()=>{V[x]=+r.value;b.textContent=r.value;L(`SET Me.${x} = ${r.value}`)};
-        d.querySelector('select').onchange=e=>{G[x]=e.target.value;L(`GEN Me.${x} -> ${e.target.value}`)};ui[x]=v=>{r.value=v;b.textContent=v}}});
-    outs.forEach(x=>{const d=row(`<div>${x} <small>(out)</small><b>0</b></div>`),b=d.querySelector('b');ui[x]=v=>b.textContent=typeof v==='number'?+v.toFixed(2):v});
-    let n=0;const tick=()=>{n++;ins.forEach(x=>{const m=G[x];if(m&&m!=='Manual'){V[x]=+(m==='Sine'?50+50*Math.sin(n/5):(n*5)%100).toFixed(1);ui[x](V[x])}});
-      L(`--- SCAN #${n} ---`);try{fn(T,m=>L('MSG '+m),Math.round)}catch(e){L('Runtime error: '+e.message);stop();return}outs.forEach(x=>ui[x](V[x]))};
-    $('#run').textContent='Stop';document.body.classList.add('dr');tick();timer=setInterval(tick,1000);
-  }
+        const r=d.querySelector('input'),b=d.querySelector('b');r.oninput=()=>{s.V[x]=+r.value;b.textContent=r.value;L(`SET Me.${x} = ${r.value}`)};
+        d.querySelector('select').onchange=e=>{s.G[x]=e.target.value;L(`GEN Me.${x} -> ${e.target.value}`)};s.ui[x]=v=>{r.value=v;b.textContent=v}}});
+    s.outs.forEach(x=>{const d=row(`<div>${x} <small>(out)</small><b>0</b></div>`),b=d.querySelector('b');s.ui[x]=v=>b.textContent=typeof v==='number'?+v.toFixed(2):v});
+    return s}
+  // Called by render() on tab/code change: stops the run, clears sliders and log, re-extracts tags for the active tab.
+  window.initSimulator=()=>{stop();LOG=[];pend=null;show();sess=build()};
+  function start(){const t=cur();if(!sess||sess.id!==t.id||sess.code!==t.code)sess=build();const s=sess;if(s.err)return L(s.err);
+    const tick=()=>{s.n++;s.ins.forEach(x=>{const m=s.G[x];if(m&&m!=='Manual'){s.V[x]=+(m==='Sine'?50+50*Math.sin(s.n/5):(s.n*5)%100).toFixed(1);s.ui[x](s.V[x])}});
+      pend=`--- SCAN #${s.n} ---`;try{s.fn(s.T,m=>W('MSG '+m),Math.round)}catch(e){L('Runtime error: '+e.message);stop();return}s.outs.forEach(x=>s.ui[x](s.V[x]))};
+    $('#run').textContent='Stop';document.body.classList.add('dr');tick();timer=setInterval(tick,1000)}
   $('#run').onclick=()=>timer?(stop(),L('Stopped.')):start();
+  $('#logClear').onclick=()=>{LOG=[];pend=null;show()};
 
   // PLC exporter dialog
   const dlg=$('#plcDlg'),out=$('#plcOut');let R={text:'',ext:'txt',mime:'text/plain'};
   const gen=()=>{const t=cur();R=PLC.convert(t.code,t.lang,$('#plcT').value);out.textContent=R.text};
   $('#plcBtn').onclick=()=>{$('#acts').classList.remove('open');gen();dlg.showModal()};$('#plcT').onchange=gen;$('#plcX').onclick=()=>dlg.close();
   $('#plcCopy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(out.textContent);
-  $('#plcDl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([R.text],{type:R.mime}));a.download=cur().name.replace(/\W+/g,'_')+'.'+R.ext;a.click()};
 })();
 
 // ---- Tab management: unique names, close confirmation, undo toast ----

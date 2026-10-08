@@ -1,8 +1,20 @@
 const TagTools={
-  extract(code){const s=new Set(),r=/\b(?:Me\.)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b|\b[A-Z]{2,5}_\d{2,4}\w*\b/g;let m;
-    const t=code.replace(/"[^"]*"|\/\/.*|\{[^}]*\}/g,' ');while(m=r.exec(t))s.add(m[0]);return [...s]},
-  toSP(code){return code.replace(/(^|[^\w."])([A-Z]{2,5}_\d{2,4}\w*(?:\.\w+)?)/g,'$1Me.$2')},
-  toInTouch(code){return code.replace(/\bMe\./g,'')}
+  _lang:c=>/\b(THEN|ENDIF)\b/i.test(c)?'qs':'cs',
+  // [{name,type,mode}] for every tag: dotted (LIT.PV) and single-word (Diameter_m), with or without Me.
+  extract(code,lang){
+    lang=lang||TagTools._lang(code);const a=Sim.analyze(code,lang),plain=code.replace(/\bMe\./g,'');
+    return a.tags.map(t=>{const e=t.replace(/\./g,'\\.'),re=new RegExp('(?<![\\w."])'+e+'(?!\\w)');
+      const shown=new RegExp('(?<![\\w.])Me\\.'+e+'(?!\\w)').test(code)?'Me.'+t:t;
+      const dis=tagKind(t)==='digital'||new RegExp('(?<![\\w.])'+e+'\\s*(?::=|=(?!=))\\s*[01]\\s*;').test(plain);
+      const real=plain.split('\n').some(l=>re.test(l)&&/\d+\.\d+/.test(l))||/\.PV$|_SP$|Temp|Flow|Speed|Level|Weight|Volume|Diameter|kW/i.test(t);
+      return {name:shown,type:dis?'Discrete':real?'Real':'Integer',mode:a.outputs.has(t)?'Write':'Read'}})},
+  // Adds Me. to every tag (dotted or single-word); skips locals, Math/System, strings, comments and existing Me.
+  toSP(code,lang){
+    lang=lang||TagTools._lang(code);const tags=Sim.analyze(code,lang).tags,keep=[],st=x=>'\u0003'+(keep.push(x)-1)+'\u0003';
+    let c=code.replace(/"[^"]*"/g,st).replace(/\/\/.*/g,st);if(lang==='qs')c=c.replace(/\{[^}]*\}/g,st);
+    [...tags].sort((x,y)=>y.length-x.length).forEach(t=>{c=c.replace(new RegExp('(?<![\\w."])'+t.replace(/\./g,'\\.')+'(?!\\w)','g'),'Me.'+t)});
+    return c.replace(/\u0003(\d+)\u0003/g,(m,i)=>keep[i])},
+  toInTouch(code){return code.replace(/(?<![\w.])Me\./g,'')}
   ,
   // InTouch QuickScript -> ArchestrA C# (comments, IF/ENDIF, operators, DIM, Me. prefix)
   qsToCs(code){
