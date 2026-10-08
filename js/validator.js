@@ -3,7 +3,7 @@ function validate(code,lang){
   const out=[],L=code.split('\n'),add=(i,sev,msg)=>out.push({line:i+1,sev,msg});
   const cnt=r=>(code.match(r)||[]).length;
   if(lang==='qs'){
-    const a=cnt(/^\s*IF\b/gim),b=cnt(/\bENDIF\b/gi);if(a!==b)add(0,'error',`IF/ENDIF mismatch: ${a} IF vs ${b} ENDIF.`);
+    const a=cnt(/\bIF\b/gi),b=cnt(/\bENDIF\b/gi);if(a!==b)add(0,'error',`IF/ENDIF mismatch: ${a} IF vs ${b} ENDIF.`);
     const w=cnt(/^\s*WHILE\b/gim),e=cnt(/\bENDWHILE\b/gi);if(w!==e)add(0,'error',`WHILE/ENDWHILE mismatch: ${w} vs ${e}.`);
     L.forEach((l,i)=>{
       if(/^\s*IF\b/i.test(l)&&!/\bTHEN\b/i.test(l))add(i,'error','IF without THEN.');
@@ -29,4 +29,10 @@ function validate(code,lang){
   }
   if(!code.trim())add(0,'warn','Editor is empty.');
   return out;
+}
+
+// Classify a tag as digital (alarms, trips, commands, feedbacks) or analog; drives simulator controls and PLC data types.
+function tagKind(n){
+  if(/\.PV$|_SP$|Timer|Speed|Stage|Mode|Count|Weight|Phase|Step|Level/i.test(n))return 'analog';
+  return /(Alarm|Trip|Fault|Interlock|\.Sw$|Slip|Fb$|Status|Auto|Enable|Reset|Open|Close|Start|Stop|Divert|Flush|Complete|Done|Tare_Cmd|Dose_Run|Run_Cmd|Lag_Cmd|\.Cmd$|Cmd_|Run$)/i.test(n)?'digital':'analog';
 }
