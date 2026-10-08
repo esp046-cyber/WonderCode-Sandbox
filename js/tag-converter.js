@@ -67,3 +67,20 @@ const PLC=(()=>{
   }
   return {convert};
 })();
+
+// ---- Converter map for the language dropdown: every pair (key = from + to) ----
+(function(){
+  const sqlTags=c=>[...new Set((c.match(/'([\w.]+)'/g)||[]).map(x=>x.slice(1,-1)))];
+  const toSql=(tags,src)=>tags.length?`-- Generated from ${src} tags (last 24 h)\nSELECT DateTime, TagName, Value\nFROM History\nWHERE TagName IN (${tags.map(t=>`'${t}'`).join(', ')})\n  AND DateTime >= DATEADD(hh,-24,GETDATE())\nORDER BY DateTime;\n`:`-- No tags found in the ${src} code.\n`;
+  const hist=t=>'Hist_'+t.replace(/\./g,'_');
+  const same=c=>c;
+  TagTools.CV={
+    qsqs:same,cscs:same,sqlsql:same,
+    qscs:c=>TagTools.qsToCs(c),
+    csqs:c=>TagTools.csToQs(c),
+    qssql:c=>toSql(Sim.analyze(c,'qs').tags,'QuickScript'),
+    cssql:c=>toSql(Sim.analyze(c,'cs').tags,'ArchestrA C#'),
+    sqlqs:c=>{const t=sqlTags(c);return t.length?`{ Generated from Historian SQL tag list }\n${t.map(x=>`${hist(x)} = ${x};`).join('\n')}\n`:'{ No quoted tag names found in the SQL. }\n'},
+    sqlcs:c=>{const t=sqlTags(c);return t.length?`// Generated from Historian SQL tag list\n${t.map(x=>`Me.${hist(x)} = Me.${x};`).join('\n')}\n`:'// No quoted tag names found in the SQL.\n'}
+  };
+})();

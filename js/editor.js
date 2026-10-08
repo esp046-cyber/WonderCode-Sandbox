@@ -78,12 +78,17 @@ function closeTab(id){if(S.tabs.length<2)return toast('Cannot close the last tab
 // ---- Language dropdown: convert / load starter / keep text ----
 (function(){
   const $=s=>document.querySelector(s),dlg=$('#langDlg'),LN={qs:'QuickScript',cs:'C#',sql:'SQL'};let to=null;
-  const CV={qscs:c=>TagTools.qsToCs(c),csqs:c=>TagTools.csToQs(c)};
   $('#lang').onchange=e=>{const t=cur();to=e.target.value;if(to===t.lang)return;
     if(!t.code.trim()){t.lang=to;render();save();return}
     $('#langMsg').textContent=`Switch this tab from ${LN[t.lang]} to ${LN[to]}? Your code is not rewritten unless you choose to.`;
-    $('#lcv').hidden=!CV[t.lang+to];dlg.showModal()};
-  $('#lcv').onclick=()=>{const t=cur();t.code=CV[t.lang+to](t.code);t.lang=to;dlg.close();save()};
+    dlg.showModal()};
+  $('#lcv').onclick=()=>{const t=cur(),fn=(TagTools.CV||{})[t.lang+to];let out=t.code;
+    try{
+      if(typeof fn==='function')out=fn(t.code);
+      else if(to==='cs')out=TagTools.toSP(t.code);          // fallback: tag prefix only
+      else if(to==='qs')out=TagTools.toInTouch(t.code);
+    }catch(err){toast('Conversion failed: '+err.message)}
+    t.code=out;t.lang=to;save();dlg.close()};   // close -> render() refreshes editor and re-validates
   $('#ltp').onclick=()=>{const p=TEMPLATES.find(x=>x.l===to);dlg.close();if(p)addTab(p.n,p.l,p.c)};
   $('#lkeep').onclick=()=>{cur().lang=to;dlg.close();save()};
   $('#lcancel').onclick=()=>dlg.close();
