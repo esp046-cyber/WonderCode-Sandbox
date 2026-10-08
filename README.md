@@ -2,7 +2,7 @@
 
 # WonderCode Sandbox ⚡
 
-> **Industrial SCADA Code Editor & Offline PWA** | Tailored for AVEVA™ System Platform, InTouch QuickScript, ArchestrA C#, and Historian SQL workflows. Optimized for field deployment at **Al Gurg Automation & Controls LLC (AGAC)**.
+> **Industrial SCADA Code Editor & Offline PWA** | Tailored for AVEVA™ System Platform, InTouch QuickScript, ArchestrA C#, and Historian SQL workflows. Optimized for field deployment 
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-brightgreen?style=for-the-badge&logo=github)](https://esp046-cyber.github.io/WonderCode-Sandbox/)
 [![PWA Ready](https://img.shields.io/badge/PWA-Offline%20Capable-blue?style=for-the-badge&logo=pwa)](https://esp046-cyber.github.io/WonderCode-Sandbox/)
