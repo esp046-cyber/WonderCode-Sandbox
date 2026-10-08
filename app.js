@@ -20,8 +20,6 @@ $('#new').onclick=()=>{const id=Date.now();S.tabs.push({id,name:'script'+(S.tabs
 $('#val').onclick=check;
 $('#toSP').onclick=()=>{cur().code=TagTools.toSP(cur().code);render();save()};
 $('#toIT').onclick=()=>{cur().code=TagTools.toInTouch(cur().code);render();save()};
-$('#run').onclick=()=>{const t=cur(),r=validate(t.code,t.lang).filter(i=>i.sev==='error');const log=[`[${new Date().toLocaleTimeString()}] Dry run: ${t.name} (${t.lang})`];
-  if(r.length)log.push(`Blocked: ${r.length} error(s). Fix them first.`);else{log.push('Syntax OK.');TagTools.extract(t.code).forEach(x=>log.push('  reads/writes '+x))}$('#log').textContent=log.join('\n')};
 $('#exp').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));a.download='wondercode-export.json';a.click()};
 $('#imp').onchange=async e=>{const f=e.target.files[0];if(!f)return;const x=await f.text();
   try{const j=JSON.parse(x);if(j.tabs){S=j}else throw 0}catch{const id=Date.now();S.tabs.push({id,name:f.name,lang:'qs',code:x});S.cur=id}render();save()};
