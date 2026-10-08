@@ -1,0 +1,19 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WonderCode Sandbox</title><meta name="theme-color" content="#0a192f">
+<meta name="description" content="Offline SCADA script sandbox for InTouch QuickScript, ArchestrA C# and Historian SQL.">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="WonderCode">
+<meta property="og:title" content="WonderCode Sandbox"><meta property="og:image" content="icons/og-image.svg">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.svg"><link rel="stylesheet" href="style.css"></head>
+<body><header><button id="menuL" class="ic" aria-label="Templates">☰</button><b>WonderCode</b><span class="sub">InTouch · ArchestrA C# · Historian SQL</span><span class="sp"></span>
+<select id="lang" aria-label="Language"><option value="qs">QuickScript</option><option value="cs">C#</option><option value="sql">SQL</option></select>
+<div id="acts"><button id="new">New tab</button><button id="exp">Export</button><label class="btn">Import<input id="imp" type="file" hidden accept=".json,.script,.txt"></label></div>
+<button id="more" class="ic" aria-label="More actions" aria-expanded="false">⋯</button><button id="menuR" class="ic" aria-label="Validator and tags">✓</button></header>
+<div id="scrim"></div>
+<main><aside id="L"><h3>AGAC templates</h3><div id="tpl"></div></aside>
+<section><div id="tabs"></div><div class="ed"><pre id="hl" aria-hidden="true"></pre><textarea id="code" spellcheck="false" autocapitalize="off" autocorrect="off" aria-label="Script editor"></textarea></div>
+<div class="bar"><button id="val">Validate</button><button id="run">Simulate</button><span id="status"></span></div></section>
+<aside id="R"><h3>Validator</h3><ul id="issues"></ul><h3>Tags</h3><div class="row"><button id="toSP">→ System Platform</button><button id="toIT">→ InTouch</button></div><ul id="tags"></ul><h3>Simulator log</h3><pre id="log"></pre></aside></main>
+<script src="js/db.js"></script><script src="js/validator.js"></script><script src="js/templates.js"></script><script src="js/tag-converter.js"></script><script src="js/editor.js"></script><script src="app.js"></script><script src="sw-register.js"></script></body></html>

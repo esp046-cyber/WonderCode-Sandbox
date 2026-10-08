@@ -1,0 +1,1 @@
+if('serviceWorker'in navigator)addEventListener('load',()=>navigator.serviceWorker.register('service-worker.js').then(r=>r.onupdatefound=()=>{const w=r.installing;w.onstatechange=()=>{if(w.state==='installed'&&navigator.serviceWorker.controller){const s=document.getElementById('status');if(s)s.textContent='Update ready: reload to apply.'}}}));
