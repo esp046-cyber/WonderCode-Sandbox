@@ -63,3 +63,29 @@ const Sim=(()=>{
   $('#plcCopy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(out.textContent);
   $('#plcDl').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([R.text],{type:R.mime}));a.download=cur().name.replace(/\W+/g,'_')+'.'+R.ext;a.click()};
 })();
+
+// ---- Tab management: unique names, close confirmation, undo toast ----
+const uniq=(n,skip)=>{const x=S.tabs.filter(t=>t.id!==skip).map(t=>t.name);if(!x.includes(n))return n;let i=1;while(x.includes(`${n} (${i})`))i++;return `${n} (${i})`};
+const isEdited=t=>t.code.trim()!==''&&t.code!==(t.orig??'');
+function addTab(name,lang,code){const id=Date.now();S.tabs.push({id,name:uniq(name),lang,code,orig:code});S.cur=id;render();save()}
+let toastT;function toast(msg,label,fn){const t=document.getElementById('toast');t.innerHTML='';const s=document.createElement('span');s.textContent=msg;t.append(s);
+  if(label){const b=document.createElement('button');b.textContent=label;b.onclick=()=>{fn();t.hidden=true};t.append(b)}t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,7000)}
+function closeTab(id){if(S.tabs.length<2)return toast('Cannot close the last tab.');const i=S.tabs.findIndex(x=>x.id===id),t=S.tabs[i];
+  if(isEdited(t)&&!confirm(`"${t.name}" has edits. Close it anyway?`))return;
+  S.tabs.splice(i,1);if(S.cur===id)S.cur=S.tabs[Math.min(i,S.tabs.length-1)].id;render();save();
+  toast(`Closed "${t.name}"`,'Undo',()=>{S.tabs.splice(i,0,t);S.cur=t.id;render();save()})}
+
+// ---- Language dropdown: convert / load starter / keep text ----
+(function(){
+  const $=s=>document.querySelector(s),dlg=$('#langDlg'),LN={qs:'QuickScript',cs:'C#',sql:'SQL'};let to=null;
+  const CV={qscs:c=>TagTools.qsToCs(c),csqs:c=>TagTools.csToQs(c)};
+  $('#lang').onchange=e=>{const t=cur();to=e.target.value;if(to===t.lang)return;
+    if(!t.code.trim()){t.lang=to;render();save();return}
+    $('#langMsg').textContent=`Switch this tab from ${LN[t.lang]} to ${LN[to]}? Your code is not rewritten unless you choose to.`;
+    $('#lcv').hidden=!CV[t.lang+to];dlg.showModal()};
+  $('#lcv').onclick=()=>{const t=cur();t.code=CV[t.lang+to](t.code);t.lang=to;dlg.close();save()};
+  $('#ltp').onclick=()=>{const p=TEMPLATES.find(x=>x.l===to);dlg.close();if(p)addTab(p.n,p.l,p.c)};
+  $('#lkeep').onclick=()=>{cur().lang=to;dlg.close();save()};
+  $('#lcancel').onclick=()=>dlg.close();
+  dlg.addEventListener('close',()=>render());
+})();

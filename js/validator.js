@@ -1,7 +1,9 @@
 // Lint rules for InTouch QuickScript, ArchestrA C# and Historian SQL.
 function validate(code,lang){
   const out=[],L=code.split('\n'),add=(i,sev,msg)=>out.push({line:i+1,sev,msg});
-  const cnt=r=>(code.match(r)||[]).length;
+  const q=(lang==='qs'?code.replace(/\{[^}]*\}/g,' '):code).replace(/\/\/.*/g,' ');
+  const cnt=r=>(q.match(r)||[]).length;
+  const dm=detectDialect(code,lang);if(dm)add(0,'warn',dm);
   if(lang==='qs'){
     const a=cnt(/\bIF\b/gi),b=cnt(/\bENDIF\b/gi);if(a!==b)add(0,'error',`IF/ENDIF mismatch: ${a} IF vs ${b} ENDIF.`);
     const w=cnt(/^\s*WHILE\b/gim),e=cnt(/\bENDWHILE\b/gi);if(w!==e)add(0,'error',`WHILE/ENDWHILE mismatch: ${w} vs ${e}.`);
@@ -35,4 +37,12 @@ function validate(code,lang){
 function tagKind(n){
   if(/\.PV$|_SP$|Timer|Speed|Stage|Mode|Count|Weight|Phase|Step|Level/i.test(n))return 'analog';
   return /(Alarm|Trip|Fault|Interlock|\.Sw$|Slip|Fb$|Status|Auto|Enable|Reset|Open|Close|Start|Stop|Divert|Flush|Complete|Done|Tare_Cmd|Dose_Run|Run_Cmd|Lag_Cmd|\.Cmd$|Cmd_|Run$)/i.test(n)?'digital':'analog';
+}
+
+// Friendly dialect check: QuickScript keywords in C# mode (and vice versa).
+function detectDialect(code,lang){
+  const c=lang==='qs'?code.replace(/\{[^}]*\}/g,' ').replace(/\/\/.*/g,' '):code.replace(/\/\/.*/g,' ');
+  if(lang==='cs'&&/\b(THEN|ENDIF|ENDWHILE)\b/i.test(c))return 'Dialect Mismatch: Code contains QuickScript keywords.';
+  if(lang==='qs'&&/\b(?:double|bool|int|var)\s+\w+\s*=|\bif\s*\(|\bMath\./.test(c))return 'Dialect Mismatch: Code looks like C#.';
+  return null;
 }

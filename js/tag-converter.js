@@ -3,6 +3,28 @@ const TagTools={
     const t=code.replace(/"[^"]*"|\/\/.*|\{[^}]*\}/g,' ');while(m=r.exec(t))s.add(m[0]);return [...s]},
   toSP(code){return code.replace(/(^|[^\w."])([A-Z]{2,5}_\d{2,4}\w*(?:\.\w+)?)/g,'$1Me.$2')},
   toInTouch(code){return code.replace(/\bMe\./g,'')}
+  ,
+  // InTouch QuickScript -> ArchestrA C# (comments, IF/ENDIF, operators, DIM, Me. prefix)
+  qsToCs(code){
+    const cm=[],tags=Sim.analyze(code,'qs').tags;
+    const cond=x=>x.replace(/<>/g,'!=').replace(/\bAND\b/gi,'&&').replace(/\bOR\b/gi,'||').replace(/\bNOT\b/gi,'!').replace(/(?<![<>!=:])=(?!=)/g,'==');
+    let c=code.replace(/\{([^}]*)\}/g,(m,x)=>'\u0003'+(cm.push(x.split('\n').map(l=>'// '+l.trim()).join('\n'))-1)+'\u0003')
+      .replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi,(m,x)=>'if ('+cond(x.trim())+') {').replace(/\bELSE\b/gi,'} else {').replace(/\bENDIF\b\s*;?/gi,'}')
+      .replace(/:=/g,'=').replace(/<>/g,'!=').replace(/\bAND\b/gi,'&&').replace(/\bOR\b/gi,'||').replace(/\bNOT\b/gi,'!')
+      .replace(/\bDIM\s+(\w+)\s+AS\s+(\w+)\s*;/gi,(m,n,t)=>(({INTEGER:'int',REAL:'double',DISCRETE:'bool',MESSAGE:'string'})[t.toUpperCase()]||'double')+' '+n+';');
+    [...tags].sort((a,b)=>b.length-a.length).forEach(t=>{c=c.replace(new RegExp('(?<![\\w."])'+t.replace(/\./g,'\\.')+'(?!\\w)','g'),'Me.'+t)});
+    return c.replace(/\u0003(\d+)\u0003/g,(m,i)=>cm[i]);
+  },
+  // ArchestrA C# -> InTouch QuickScript (comments, if/}, operators, declarations, no Me.)
+  csToQs(code){
+    const cm=[],cond=x=>x.replace(/&&/g,' AND ').replace(/\|\|/g,' OR ').replace(/!=/g,'<>').replace(/!(?!=)/g,'NOT ');
+    let c=code.replace(/\bMe\./g,'').replace(/\/\/(.*)$/gm,(m,x)=>'\u0003'+(cm.push('{'+x+' }')-1)+'\u0003');
+    const warn=/Math\.|\?[^:\n]*:/.test(c)?'{ Review: Math.* and ?: have no QuickScript translation }\n':'';
+    c=c.replace(/\bif\s*\(([^\n]*)\)\s*\{/g,(m,x)=>'IF '+cond(x.trim())+' THEN').replace(/\}\s*else\s*\{/g,'ELSE').replace(/\}/g,'ENDIF;');
+    c=cond(c).replace(/\b(double|float|int|bool|var)\s+(\w+)\s*=/g,(m,t,n)=>`DIM ${n} AS ${t==='int'?'INTEGER':t==='bool'?'DISCRETE':'REAL'};\n${n} =`)
+      .replace(/([\w.]+)\s*([+-])=\s*([^;]+);/g,'$1 = $1 $2 ($3);').replace(/\btrue\b/g,'1').replace(/\bfalse\b/g,'0');
+    return warn+c.replace(/\u0003(\d+)\u0003/g,(m,i)=>cm[i]);
+  }
 };
 
 // ---- PLC exporter: QuickScript / ArchestrA C# -> Siemens SCL, Rockwell ST, Modbus CSV ----
