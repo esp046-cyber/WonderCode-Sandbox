@@ -15,7 +15,11 @@ function check(){const t=cur(),r=validate(t.code,t.lang);$('#issues').innerHTML=
 let timer;ta.oninput=()=>{cur().code=ta.value;highlight();clearTimeout(timer);timer=setTimeout(()=>{check();save()},400)};
 ta.onscroll=()=>{hl.scrollTop=ta.scrollTop;hl.scrollLeft=ta.scrollLeft};
 ta.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();document.execCommand('insertText',false,'  ')}};
-$('#lang').onchange=e=>{cur().lang=e.target.value;check();save()};
+$('#lang').onchange=e=>{const t=cur(),to=e.target.value,from=t.lang;
+  // Only the Me. tag prefix is converted; IF/ENDIF vs if{} syntax is not rewritten.
+  if(from==='qs'&&to==='cs'&&confirm('Add Me. prefix to InTouch tags?'))t.code=TagTools.toSP(t.code);
+  else if(from==='cs'&&to==='qs'&&confirm('Remove Me. prefix from tags?'))t.code=TagTools.toInTouch(t.code);
+  t.lang=to;render();save()};
 $('#new').onclick=()=>{const id=Date.now();S.tabs.push({id,name:'script'+(S.tabs.length+1),lang:'qs',code:''});S.cur=id;render();save()};
 $('#val').onclick=check;
 $('#toSP').onclick=()=>{cur().code=TagTools.toSP(cur().code);render();save()};
