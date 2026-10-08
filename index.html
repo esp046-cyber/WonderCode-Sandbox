@@ -9,11 +9,12 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.svg"><link rel="stylesheet" href="style.css"></head>
 <body><header><button id="menuL" class="ic" aria-label="Templates">☰</button><b>WonderCode</b><span class="sub">InTouch · ArchestrA C# · Historian SQL</span><span class="sp"></span>
 <select id="lang" aria-label="Language"><option value="qs">QuickScript</option><option value="cs">C#</option><option value="sql">SQL</option></select>
-<div id="acts"><button id="new">New tab</button><button id="exp">Export</button><label class="btn">Import<input id="imp" type="file" hidden accept=".json,.script,.txt"></label></div>
+<div id="acts"><button id="new">New tab</button><button id="exp">Export</button><button id="plcBtn">PLC export</button><label class="btn">Import<input id="imp" type="file" hidden accept=".json,.script,.txt"></label></div>
 <button id="more" class="ic" aria-label="More actions" aria-expanded="false">⋯</button><button id="menuR" class="ic" aria-label="Validator and tags">✓</button></header>
 <div id="scrim"></div>
 <main><aside id="L"><h3>AGAC templates</h3><div id="tpl"></div></aside>
 <section><div id="tabs"></div><div class="ed"><pre id="hl" aria-hidden="true"></pre><textarea id="code" spellcheck="false" autocapitalize="off" autocorrect="off" aria-label="Script editor"></textarea></div>
 <div class="bar"><button id="val">Validate</button><button id="run">Simulate</button><span id="status"></span></div></section>
-<aside id="R"><h3>Validator</h3><ul id="issues"></ul><h3>Tags</h3><div class="row"><button id="toSP">→ System Platform</button><button id="toIT">→ InTouch</button></div><ul id="tags"></ul><h3>Simulator log</h3><pre id="log"></pre></aside></main>
+<aside id="R"><h3>Validator</h3><ul id="issues"></ul><h3>Tags</h3><div class="row"><button id="toSP">→ System Platform</button><button id="toIT">→ InTouch</button></div><ul id="tags"></ul><h3>Simulator</h3><div id="sim"></div><h3>Execution log</h3><pre id="log"></pre></aside></main>
+<dialog id="plcDlg"><div class="row"><select id="plcT" aria-label="Target"><option value="scl">Siemens SCL (TIA Portal)</option><option value="st">Rockwell Structured Text</option><option value="csv">Modbus map (CSV)</option></select><button id="plcCopy">Copy</button><button id="plcDl">Download</button><button id="plcX">Close</button></div><pre id="plcOut"></pre></dialog>
 <script src="js/db.js"></script><script src="js/validator.js"></script><script src="js/templates.js"></script><script src="js/tag-converter.js"></script><script src="js/editor.js"></script><script src="app.js"></script><script src="sw-register.js"></script></body></html>
