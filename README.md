@@ -7,6 +7,7 @@
 [![PWA Ready](https://img.shields.io/badge/PWA-Offline%20Capable-blue?style=for-the-badge&logo=pwa)](https://esp046-cyber.github.io/WonderCode-Sandbox/)
 [![iOS Optimized](https://img.shields.io/badge/iOS-Mobile%20Safari-black?style=for-the-badge&logo=apple)](https://esp046-cyber.github.io/WonderCode-Sandbox/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+```
 
 ---
 
