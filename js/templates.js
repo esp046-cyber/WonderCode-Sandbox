@@ -8,16 +8,16 @@ const TEMPLATES = [
     g: 'Oil & Gas',
     n: 'HH alarm ESD interlock',
     l: 'qs',
-    desc: 'Emergency Shutdown: Automatically trips the inlet valve if tank liquid level exceeds the High-High safety threshold.',
+    desc: 'Emergency Shutdown (ESD): Automatically closes the inlet isolation valve if tank level reaches High-High (HH) alarm threshold.',
     inputs: [
-      { tag: 'TK_101_LIT_PV', label: 'Tank Level', unit: '%', min: 0, max: 100, default: 50 },
-      { tag: 'TK_101_HH_SP', label: 'High-High Trip Setpoint', unit: '%', min: 50, max: 100, default: 85 }
+      { tag: 'TK_101_LIT_PV', label: 'Tank Level', unit: '%', min: 0, max: 100, default: 50, tip: 'Level Indicating Transmitter - Current Liquid Height' },
+      { tag: 'TK_101_HH_SP', label: 'High-High Setpoint', unit: '%', min: 50, max: 100, default: 85, tip: 'Trip Threshold: Level above this closes the emergency valve' }
     ],
     outputs: [
-      { tag: 'TK_101_ESD_Cmd', label: 'ESD Trip Alarm (1 = Tripped)', type: 'discrete' },
-      { tag: 'XV_101_Close', label: 'Inlet Emergency Valve (1 = Closed)', type: 'discrete' }
+      { tag: 'TK_101_ESD_Cmd', label: 'ESD Safety Trip (1 = Active)', type: 'discrete', tip: 'Emergency Shutdown Command to DCS' },
+      { tag: 'XV_101_Close', label: 'Emergency Inlet Valve (1 = Closed)', type: 'discrete', tip: 'Actuator output to solenoid valve' }
     ],
-    c: `{ Tank farm ESD: High-High level closes inlet valve with 2% deadband }
+    c: `{ Tank farm ESD: High-High level closes inlet valve with 2% safety deadband }
 IF TK_101_LIT_PV >= TK_101_HH_SP THEN
     TK_101_ESD_Cmd = 1;
     XV_101_Close = 1;
@@ -39,14 +39,14 @@ Hist_XV_101_Close = XV_101_Close;
     g: 'Oil & Gas',
     n: 'Tank volume (strapping)',
     l: 'cs',
-    desc: 'Calculates liquid volume in cubic meters (m³) and barrels (bbl) from millimeters of tank level height.',
+    desc: 'Calculates true liquid inventory in cubic meters (m³) and standard oil barrels (bbl) from tank level height (mm).',
     inputs: [
-      { tag: 'Diameter_m', label: 'Tank Diameter', unit: 'm', min: 1, max: 50, default: 12 },
-      { tag: 'LIT_PV', label: 'Level Reading', unit: 'mm', min: 0, max: 15000, default: 7500 }
+      { tag: 'Diameter_m', label: 'Tank Diameter', unit: 'm', min: 1, max: 50, default: 12, tip: 'Internal diameter of cylindrical storage tank' },
+      { tag: 'LIT_PV', label: 'Measured Level', unit: 'mm', min: 0, max: 15000, default: 7500, tip: 'Level transmitter reading in millimeters' }
     ],
     outputs: [
-      { tag: 'Volume_m3', label: 'Net Volume', unit: 'm³', type: 'analog' },
-      { tag: 'Volume_bbl', label: 'Net Volume', unit: 'bbl', type: 'analog' }
+      { tag: 'Volume_m3', label: 'Net Volume', unit: 'm³', type: 'analog', tip: 'Calculated liquid volume in cubic meters' },
+      { tag: 'Volume_bbl', label: 'Net Volume', unit: 'bbl', type: 'analog', tip: 'Standard US Petroleum Barrels (1 m³ = 6.28981 bbl)' }
     ],
     c: `// Cylindrical tank: m3 and bbl calculation from level mm
 double dia = Convert.ToDouble(Me.Diameter_m);
@@ -61,13 +61,13 @@ Me.Volume_bbl = Convert.ToDouble(Me.Volume_m3) * 6.28981;
     g: 'Oil & Gas',
     n: 'Pipeline flow accumulator',
     l: 'cs',
-    desc: 'Accumulates flow rate (m³/h) into totalized volume (m³) every second with quality code checking.',
+    desc: 'Totalizes flow rate (m³/h) into accumulated volume (m³) each second, verifying OPC/DCS signal quality first.',
     inputs: [
-      { tag: 'FIT_PV', label: 'Flow Rate', unit: 'm³/h', min: 0, max: 1000, default: 250 },
-      { tag: 'FIT_Quality', label: 'Signal Quality (192 = Good)', min: 0, max: 255, default: 192 }
+      { tag: 'FIT_PV', label: 'Flow Rate', unit: 'm³/h', min: 0, max: 1000, default: 250, tip: 'Flow Indicating Transmitter' },
+      { tag: 'FIT_Quality', label: 'Signal Quality', min: 0, max: 255, default: 192, tip: '192 indicates OPC Good Quality status' }
     ],
     outputs: [
-      { tag: 'Total_m3', label: 'Totalized Flow', unit: 'm³', type: 'analog' }
+      { tag: 'Total_m3', label: 'Totalized Flow', unit: 'm³', type: 'analog', tip: 'Cumulative volume delivered through pipeline' }
     ],
     c: `// Execute @ 1-second scan rate: m3/h converted to m3 increment
 if (Convert.ToDouble(Me.FIT_PV) > 0.0 && Convert.ToInt32(Me.FIT_Quality) == 192)
@@ -80,17 +80,17 @@ if (Convert.ToDouble(Me.FIT_PV) > 0.0 && Convert.ToInt32(Me.FIT_Quality) == 192)
     g: 'Water',
     n: 'Duty/standby pump rotation',
     l: 'qs',
-    desc: 'Alternates duty between two pumps upon fault or every 24 hours of operation.',
+    desc: 'Rotates Lead/Lag duties between two pumps upon electrical fault or automatically every 24 hours of runtime.',
     inputs: [
-      { tag: 'WW_LIT_PV', label: 'Wet Well Level', unit: 'm', min: 0, max: 10, default: 6 },
-      { tag: 'Start_SP', label: 'Lead Start Setpoint', unit: 'm', min: 1, max: 9, default: 5 },
-      { tag: 'PUMP_01_Fault', label: 'Pump 1 Faulted', type: 'discrete', default: 0 },
-      { tag: 'Rotate_Timer_PV', label: 'Rotation Timer', unit: 'sec', min: 0, max: 86400, default: 0 }
+      { tag: 'WW_LIT_PV', label: 'Sump Level', unit: 'm', min: 0, max: 10, default: 6, tip: 'Wet Well water level transmitter' },
+      { tag: 'Start_SP', label: 'Start Setpoint', unit: 'm', min: 1, max: 9, default: 5, tip: 'Level at which lead pump starts' },
+      { tag: 'PUMP_01_Fault', label: 'Pump 1 Fault Switch', type: 'discrete', default: 0, tip: 'Overload or VFD fault trip' },
+      { tag: 'Rotate_Timer_PV', label: 'Rotation Elapsed Timer', unit: 's', min: 0, max: 86400, default: 0, tip: 'Elapsed run time in seconds (86400 s = 24 h)' }
     ],
     outputs: [
-      { tag: 'Duty_Pump', label: 'Active Duty Pump (1 or 2)', type: 'analog' },
-      { tag: 'PUMP_01_Cmd_Start', label: 'Pump 1 Start Command', type: 'discrete' },
-      { tag: 'PUMP_02_Cmd_Start', label: 'Pump 2 Start Command', type: 'discrete' }
+      { tag: 'Duty_Pump', label: 'Current Duty Pump (1 or 2)', type: 'analog', tip: 'Indicates which pump has lead priority' },
+      { tag: 'PUMP_01_Cmd_Start', label: 'Pump 1 Start Command', type: 'discrete', tip: 'Output to Pump 1 contactor' },
+      { tag: 'PUMP_02_Cmd_Start', label: 'Pump 2 Start Command', type: 'discrete', tip: 'Output to Pump 2 contactor' }
     ],
     c: `{ Duty/Standby pump alternating routine }
 IF PUMP_01_Fault == 1 OR Rotate_Timer_PV >= 86400 THEN
@@ -116,15 +116,15 @@ ENDIF;
     g: 'Water',
     n: 'Chemical dosing feedback',
     l: 'cs',
-    desc: 'Proportional chlorine dosing speed control bounded safely between 0% and 100%.',
+    desc: 'Adjusts sodium hypochlorite dosing pump speed proportionally based on measured residual chlorine error.',
     inputs: [
-      { tag: 'Cl2_SP', label: 'Target Chlorine', unit: 'ppm', min: 0, max: 5, default: 2.0 },
-      { tag: 'Cl2_AIT_PV', label: 'Measured Chlorine', unit: 'ppm', min: 0, max: 5, default: 1.6 },
-      { tag: 'Base_Speed', label: 'Base Pump Speed', unit: '%', min: 0, max: 100, default: 45 },
-      { tag: 'Kp', label: 'Gain (Kp)', min: 1, max: 50, default: 15 }
+      { tag: 'Cl2_SP', label: 'Target Chlorine', unit: 'ppm', min: 0, max: 5, default: 2.0, tip: 'Disinfection target residual setpoint' },
+      { tag: 'Cl2_AIT_PV', label: 'Measured Chlorine', unit: 'ppm', min: 0, max: 5, default: 1.6, tip: 'Analytical analyzer reading' },
+      { tag: 'Base_Speed', label: 'Base Pump Speed', unit: '%', min: 0, max: 100, default: 45, tip: 'Nominal stroke rate' },
+      { tag: 'Kp', label: 'Proportional Gain (Kp)', min: 1, max: 50, default: 15, tip: 'Control loop tuning factor' }
     ],
     outputs: [
-      { tag: 'DosePump_Speed', label: 'Dosing Pump Speed', unit: '%', type: 'analog' }
+      { tag: 'DosePump_Speed', label: 'Dosing Pump Command', unit: '%', type: 'analog', tip: 'Speed output sent to chemical metering pump' }
     ],
     c: `// Proportional feedback dosing control
 double err = Convert.ToDouble(Me.Cl2_SP) - Convert.ToDouble(Me.Cl2_AIT_PV);
@@ -138,14 +138,14 @@ Me.DosePump_Speed = Math.Max(0.0, Math.Min(100.0, finalSpeed));
     g: 'Water',
     n: 'Wet well level sequencer',
     l: 'qs',
-    desc: 'Stages three pumps sequentially as the sump rises; stops all pumps when level drops below low setpoint.',
+    desc: 'Stages three stormwater lift pumps sequentially as the sump rises, stopping all pumps when level drops below low setpoint.',
     inputs: [
-      { tag: 'WW_LIT_PV', label: 'Wet Well Level', unit: 'm', min: 0, max: 5, default: 1.5 }
+      { tag: 'WW_LIT_PV', label: 'Wet Well Level', unit: 'm', min: 0, max: 5, default: 1.5, tip: 'Depth of water in sump chamber' }
     ],
     outputs: [
-      { tag: 'PUMP_01_Cmd_Start', label: 'Pump 1 (Lead)', type: 'discrete' },
-      { tag: 'PUMP_02_Cmd_Start', label: 'Pump 2 (Lag 1)', type: 'discrete' },
-      { tag: 'PUMP_03_Cmd_Start', label: 'Pump 3 (Lag 2)', type: 'discrete' }
+      { tag: 'PUMP_01_Cmd_Start', label: 'Pump 1 (Lead)', type: 'discrete', tip: 'Starts at 2.0 m' },
+      { tag: 'PUMP_02_Cmd_Start', label: 'Pump 2 (Lag 1)', type: 'discrete', tip: 'Starts at 2.8 m' },
+      { tag: 'PUMP_03_Cmd_Start', label: 'Pump 3 (Lag 2)', type: 'discrete', tip: 'Starts at 3.5 m' }
     ],
     c: `{ Level staging with low-level interlock cut-off }
 IF WW_LIT_PV >= 3.5 THEN 
@@ -171,15 +171,15 @@ ENDIF;
     g: 'Infrastructure',
     n: 'Chiller sequencing',
     l: 'qs',
-    desc: 'Calculates necessary operational chiller count based on thermal load and chiller capacity.',
+    desc: 'Calculates active chiller count required to meet cooling demand without cycling compressors excessively.',
     inputs: [
-      { tag: 'DCP_Load_kW', label: 'Current District Load', unit: 'kW', min: 0, max: 15000, default: 6200 },
-      { tag: 'CH_Cap_kW', label: 'Unit Chiller Capacity', unit: 'kW', min: 1000, max: 5000, default: 3000 }
+      { tag: 'DCP_Load_kW', label: 'District Thermal Load', unit: 'kW', min: 0, max: 15000, default: 6200, tip: 'Combined cooling load required by campus' },
+      { tag: 'CH_Cap_kW', label: 'Chiller Rated Capacity', unit: 'kW', min: 1000, max: 5000, default: 3000, tip: 'Cooling capacity of each individual chiller machine' }
     ],
     outputs: [
-      { tag: 'CH_01_Cmd_Run', label: 'Chiller 1 Enable', type: 'discrete' },
-      { tag: 'CH_02_Cmd_Run', label: 'Chiller 2 Enable', type: 'discrete' },
-      { tag: 'CH_03_Cmd_Run', label: 'Chiller 3 Enable', type: 'discrete' }
+      { tag: 'CH_01_Cmd_Run', label: 'Chiller 1 Enable', type: 'discrete', tip: 'Stage 1 machine' },
+      { tag: 'CH_02_Cmd_Run', label: 'Chiller 2 Enable', type: 'discrete', tip: 'Stage 2 machine' },
+      { tag: 'CH_03_Cmd_Run', label: 'Chiller 3 Enable', type: 'discrete', tip: 'Stage 3 machine' }
     ],
     c: `{ Chiller staging calculation }
 DIM stages AS INTEGER;
@@ -198,13 +198,13 @@ CH_03_Cmd_Run = (stages >= 3);
     g: 'Infrastructure',
     n: 'VFD speed ramp',
     l: 'cs',
-    desc: 'Ramps drive speed command at 2%/second to prevent water hammer and mechanical shear.',
+    desc: 'Slews variable frequency drive speed command at 2%/second to prevent pipe water hammer and voltage spikes.',
     inputs: [
-      { tag: 'Speed_SP', label: 'Operator Target Speed', unit: '%', min: 0, max: 100, default: 80 },
-      { tag: 'Speed_Cmd', label: 'Current Ramp Speed', unit: '%', min: 0, max: 100, default: 20 }
+      { tag: 'Speed_SP', label: 'Target Speed', unit: '%', min: 0, max: 100, default: 80, tip: 'Operator requested running speed' },
+      { tag: 'Speed_Cmd', label: 'Current Ramp Speed', unit: '%', min: 0, max: 100, default: 20, tip: 'Current output to frequency inverter' }
     ],
     outputs: [
-      { tag: 'Speed_Cmd', label: 'Ramped Output to Drive', unit: '%', type: 'analog' }
+      { tag: 'Speed_Cmd', label: 'Ramped Speed Output', unit: '%', type: 'analog', tip: 'Smoothly modulated speed signal' }
     ],
     c: `// Execute @ 1 s: Ramps 2.0 %/s towards setpoint
 double step = 2.0;
@@ -223,40 +223,21 @@ else
 `
   },
   {
-    g: 'Data & mapping',
-    n: 'Historian: 24 h hourly avg',
-    l: 'sql',
-    desc: 'Queries AVEVA Historian for 24-hour hourly time-weighted average process values.',
-    inputs: [],
-    outputs: [],
-    c: `SELECT 
-    DateTime, 
-    TagName, 
-    AVG(Value) AS AvgValue
-FROM History
-WHERE TagName IN ('TK_101_LIT.PV', 'FIT_201.PV')
-  AND DateTime >= DATEADD(hh, -24, GETDATE())
-  AND wwResolution = 3600000
-GROUP BY DateTime, TagName
-ORDER BY DateTime ASC;
-`
-  },
-  {
     g: 'District Cooling',
     n: 'TES charge/discharge valves',
     l: 'qs',
-    desc: 'Break-before-make interlocked actuation for thermal energy storage (TES) charge and discharge isolation valves.',
+    desc: 'Break-before-make interlocked sequencing for thermal storage charge and discharge valves to avoid cross-circulation.',
     inputs: [
-      { tag: 'TES_Mode', label: 'Mode (0=Idle, 1=Charge, 2=Discharge)', min: 0, max: 2, default: 1 },
-      { tag: 'TES_Temp_Top_PV', label: 'Top Temperature', unit: '°C', min: 0, max: 20, default: 8.0 },
-      { tag: 'TES_Level_PV', label: 'Tank Level', unit: '%', min: 0, max: 100, default: 60 },
-      { tag: 'TES_CV_Dis_ClosedFb', label: 'Discharge Valve Closed Switch', type: 'discrete', default: 1 },
-      { tag: 'TES_CV_Chg_ClosedFb', label: 'Charge Valve Closed Switch', type: 'discrete', default: 1 },
-      { tag: 'TES_Interlock_Trip', label: 'Safety Trip Interlock', type: 'discrete', default: 0 }
+      { tag: 'TES_Mode', label: 'Mode (0=Idle, 1=Chg, 2=Disch)', min: 0, max: 2, default: 1, tip: 'Thermal Energy Storage operational state' },
+      { tag: 'TES_Temp_Top_PV', label: 'Top Temperature', unit: '°C', min: 0, max: 20, default: 8.0, tip: 'Warm water layer temperature at tank crown' },
+      { tag: 'TES_Level_PV', label: 'Tank Level', unit: '%', min: 0, max: 100, default: 60, tip: 'Storage tank inventory level' },
+      { tag: 'TES_CV_Dis_ClosedFb', label: 'Discharge Valve Closed Switch', type: 'discrete', default: 1, tip: 'Limit switch feedback confirming closed state' },
+      { tag: 'TES_CV_Chg_ClosedFb', label: 'Charge Valve Closed Switch', type: 'discrete', default: 1, tip: 'Limit switch feedback confirming closed state' },
+      { tag: 'TES_Interlock_Trip', label: 'Emergency Trip Interlock', type: 'discrete', default: 0, tip: 'Trip signal overrides and closes all valves' }
     ],
     outputs: [
-      { tag: 'TES_CV_Chg_Cmd', label: 'Charge Valve Open Cmd', type: 'discrete' },
-      { tag: 'TES_CV_Dis_Cmd', label: 'Discharge Valve Open Cmd', type: 'discrete' }
+      { tag: 'TES_CV_Chg_Cmd', label: 'Charge Valve Open Command', type: 'discrete', tip: 'Actuation command to charge control valve' },
+      { tag: 'TES_CV_Dis_Cmd', label: 'Discharge Valve Open Command', type: 'discrete', tip: 'Actuation command to discharge control valve' }
     ],
     c: `{ TES valve sequencer: Break-before-make safety }
 IF (TES_Mode == 1) AND (TES_Temp_Top_PV > 5.5) THEN
@@ -284,18 +265,18 @@ ENDIF;
     g: 'District Cooling',
     n: 'CHW DP lead/lag pump ramp',
     l: 'cs',
-    desc: 'Chilled water differential pressure pump ramping; auto-starts lag pump if lead speed exceeds 95%.',
+    desc: 'Chilled water differential pressure modulation: auto-starts secondary lag pump when lead drive exceeds 95% speed.',
     inputs: [
-      { tag: 'CHW_DP_SP', label: 'Target Diff Pressure', unit: 'bar', min: 1, max: 6, default: 3.5 },
-      { tag: 'CHW_DP_PV', label: 'Measured Diff Pressure', unit: 'bar', min: 1, max: 6, default: 2.8 },
-      { tag: 'Lead_Speed', label: 'Lead Pump Speed', unit: '%', min: 0, max: 100, default: 85 },
-      { tag: 'Lag_Run_Fb', label: 'Lag Pump Running Feedback', type: 'discrete', default: 0 },
-      { tag: 'Kp', label: 'Loop Gain', min: 0.1, max: 5.0, default: 1.2 }
+      { tag: 'CHW_DP_SP', label: 'Target DP Setpoint', unit: 'bar', min: 1, max: 6, default: 3.5, tip: 'Required index riser differential pressure' },
+      { tag: 'CHW_DP_PV', label: 'Measured Header DP', unit: 'bar', min: 1, max: 6, default: 2.8, tip: 'Current field differential pressure measurement' },
+      { tag: 'Lead_Speed', label: 'Lead Pump Speed', unit: '%', min: 0, max: 100, default: 85, tip: 'Current speed command of operational pump' },
+      { tag: 'Lag_Run_Fb', label: 'Lag Pump Running Feedback', type: 'discrete', default: 0, tip: 'Feedback confirming lag pump motor is rotating' },
+      { tag: 'Kp', label: 'Proportional Gain', min: 0.1, max: 5.0, default: 1.2, tip: 'Loop gain factor' }
     ],
     outputs: [
-      { tag: 'Lead_Speed', label: 'Lead Speed Command', unit: '%', type: 'analog' },
-      { tag: 'Lag_Cmd', label: 'Lag Start Command', type: 'discrete' },
-      { tag: 'Lag_Speed', label: 'Lag Speed Command', unit: '%', type: 'analog' }
+      { tag: 'Lead_Speed', label: 'Lead Speed Command', unit: '%', type: 'analog', tip: 'Output to lead variable speed drive' },
+      { tag: 'Lag_Cmd', label: 'Lag Pump Start Command', type: 'discrete', tip: 'Starts secondary pump when lead is overloaded' },
+      { tag: 'Lag_Speed', label: 'Lag Speed Command', unit: '%', type: 'analog', tip: 'Synchronized speed to lag drive' }
     ],
     c: `// Secondary CHW DP control (Scan: 1 s)
 double err = Convert.ToDouble(Me.CHW_DP_SP) - Convert.ToDouble(Me.CHW_DP_PV);
@@ -323,15 +304,15 @@ if (Convert.ToInt32(Me.Lag_Cmd) == 1) {
     g: 'Metals & Minerals',
     n: 'Conveyor zero-speed/slip trip',
     l: 'qs',
-    desc: 'Monitors conveyor run command against zero-speed switch; trips motor if slip is sustained for 10 seconds.',
+    desc: 'Slip protection: Trips the conveyor motor if the contactor is commanded to run but the pulse zero-speed switch detects no rotation for 10 s.',
     inputs: [
-      { tag: 'CV_101_Run_Fb', label: 'Motor Contactor Run Feedback', type: 'discrete', default: 1 },
-      { tag: 'CV_101_ZSS_Sw', label: 'Zero Speed Switch (1 = Stopped)', type: 'discrete', default: 1 },
-      { tag: 'CV_101_Reset', label: 'Operator Reset PB', type: 'discrete', default: 0 }
+      { tag: 'CV_101_Run_Fb', label: 'Motor Auxiliary Contact Run Feedback', type: 'discrete', default: 1, tip: '1 confirms motor starter is energized' },
+      { tag: 'CV_101_ZSS_Sw', label: 'Zero Speed Switch (1 = Stopped)', type: 'discrete', default: 1, tip: 'Proximity sensor on non-driven tail pulley' },
+      { tag: 'CV_101_Reset', label: 'Trip Reset Pushbutton', type: 'discrete', default: 0, tip: 'Operator reset button on MCC panel' }
     ],
     outputs: [
-      { tag: 'CV_101_Slip_Trip', label: 'Belt Slip Fault Trip', type: 'discrete' },
-      { tag: 'CV_101_Run_Cmd', label: 'Conveyor Motor Run Command', type: 'discrete' }
+      { tag: 'CV_101_Slip_Trip', label: 'Belt Slip Fault Trip', type: 'discrete', tip: 'Tripped safety condition' },
+      { tag: 'CV_101_Run_Cmd', label: 'Motor Run Command', type: 'discrete', tip: 'Permissive contact to drive or soft-starter' }
     ],
     c: `{ Belt slip detection: Motor commanded but speed sensor detects stop }
 IF CV_101_Run_Fb == 1 AND CV_101_ZSS_Sw == 1 THEN
@@ -354,14 +335,14 @@ ENDIF;
     g: 'Metals & Minerals',
     n: 'Jaw crusher lube oil trips',
     l: 'cs',
-    desc: 'Emergency interlock: Trips the crusher motor if oil temperature exceeds 65°C or lube flow drops below 8 L/min.',
+    desc: 'Equipment protection: Emergency shutdown if lube oil temperature exceeds 65°C or lubrication flow drops below 8 L/min for 5 continuous seconds.',
     inputs: [
-      { tag: 'JC_Lube_Temp_PV', label: 'Lube Oil Temperature', unit: '°C', min: 20, max: 100, default: 68 },
-      { tag: 'JC_Lube_Flow_PV', label: 'Lube Oil Flow Rate', unit: 'L/min', min: 0, max: 20, default: 5 }
+      { tag: 'JC_Lube_Temp_PV', label: 'Lube Oil Temperature', unit: '°C', min: 20, max: 100, default: 68, tip: 'Temperature transmitter on bearing oil reservoir' },
+      { tag: 'JC_Lube_Flow_PV', label: 'Lube Oil Flow Rate', unit: 'L/min', min: 0, max: 20, default: 5, tip: 'Positive displacement lube flow transmitter' }
     ],
     outputs: [
-      { tag: 'JC_Trip', label: 'Crusher Trip Output', type: 'discrete' },
-      { tag: 'JC_Run_Cmd', label: 'Crusher Enable Command', type: 'discrete' }
+      { tag: 'JC_Trip', label: 'Crusher Motor Trip Output', type: 'discrete', tip: 'De-energizes primary crusher drive' },
+      { tag: 'JC_Run_Cmd', label: 'Crusher Permissive Run Command', type: 'discrete', tip: 'Main run permissive output' }
     ],
     c: `// Execute @ 1 s scan: High temp or low flow trips crusher after 5 s
 bool tempHi = Convert.ToDouble(Me.JC_Lube_Temp_PV) > 65.0;
@@ -383,17 +364,17 @@ if (Convert.ToInt32(Me.JC_Lube_Timer_PV) >= 5) {
     g: 'Food & Beverage',
     n: 'HTST divert valve interlock',
     l: 'cs',
-    desc: 'Pasteurizer divert valve safety interlock: Diverts milk back to balance tank if hold tube temperature drops below legal limit.',
+    desc: 'Pasteurization safety: Diverts milk back to raw balance tank if holding tube temperature falls below the 72.0°C legal legal minimum.',
     inputs: [
-      { tag: 'HT_Hold_Temp_PV', label: 'Holding Tube Temperature', unit: '°C', min: 60, max: 85, default: 72.0 },
-      { tag: 'HT_Hold_Temp_SP', label: 'Legal Pasteurization Setpoint', unit: '°C', min: 70, max: 75, default: 72.5 },
-      { tag: 'HT_Flow_PV', label: 'Product Flow Rate', unit: 'L/h', min: 0, max: 5000, default: 2500 },
-      { tag: 'HT_Flow_Min_SP', label: 'Minimum Legal Flow', unit: 'L/h', min: 500, max: 2000, default: 1000 },
-      { tag: 'HT_Reset', label: 'Fault Reset Button', type: 'discrete', default: 0 }
+      { tag: 'HT_Hold_Temp_PV', label: 'Holding Tube Temperature', unit: '°C', min: 60, max: 85, default: 72.0, tip: 'Sanitary RTD temperature transmitter at holding tube discharge' },
+      { tag: 'HT_Hold_Temp_SP', label: 'Legal Pasteurization Setpoint', unit: '°C', min: 70, max: 75, default: 72.5, tip: 'Statutory regulatory temperature minimum' },
+      { tag: 'HT_Flow_PV', label: 'Milk Flow Rate', unit: 'L/h', min: 0, max: 5000, default: 2500, tip: 'Electromagnetic sanitary flow meter' },
+      { tag: 'HT_Flow_Min_SP', label: 'Minimum Legal Flow', unit: 'L/h', min: 500, max: 2000, default: 1000, tip: 'Velocity verification for holding tube residence time' },
+      { tag: 'HT_Reset', label: 'Safety Reset Pushbutton', type: 'discrete', default: 0, tip: 'Manual operator reset required after sub-temperature trip' }
     ],
     outputs: [
-      { tag: 'HT_Divert_Fwd', label: 'Forward Valve (1 = Forward, 0 = Divert)', type: 'discrete' },
-      { tag: 'HT_Interlock_Trip', label: 'Sub-temperature Latched Trip', type: 'discrete' }
+      { tag: 'HT_Divert_Fwd', label: 'Flow Divert Valve (1 = Forward, 0 = Divert)', type: 'discrete', tip: 'Directs pasteurized product to cooling section' },
+      { tag: 'HT_Interlock_Trip', label: 'Latched Safety Trip', type: 'discrete', tip: 'Interlock state requiring physical push of Reset button' }
     ],
     c: `// Pasteurizer divert safety interlock
 bool tempOk = Convert.ToDouble(Me.HT_Hold_Temp_PV) >= Convert.ToDouble(Me.HT_Hold_Temp_SP);
