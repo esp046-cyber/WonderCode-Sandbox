@@ -239,7 +239,7 @@ const Sim = (() => {
       if (isDiscTag(x)) {
         const d = row(`
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="color:#cbd5e1;">${x}</strong>
+            <strong style="color:#cbd5e1;" title="Digital Switch">${x}</strong>
             <label style="cursor:pointer; display:flex; align-items:center; gap:6px;">
               <input type="checkbox" style="width:18px; height:18px; cursor:pointer;">
               <span class="disc-txt" style="font-size:11px; font-weight:bold; color:#86efac;">OFF (0)</span>
@@ -257,27 +257,33 @@ const Sim = (() => {
       } else {
         const d = row(`
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <strong style="color:#cbd5e1;">${x}</strong>
+            <strong style="color:#cbd5e1;" title="Analog Measurement">${x}</strong>
             <span class="val-pill" style="color:#00f2fe; background:#07111e; padding:1px 6px; border-radius:4px; font-weight:bold; border:1px solid #1e3a5f;">50</span>
           </div>
           <select aria-label="Generator" style="width:100%; margin-bottom:4px;">
-            <option>Manual</option>
-            <option>Sine</option>
-            <option>Ramp</option>
+            <option value="Manual">Manual Control</option>
+            <option value="Sine">Auto: Sine Wave</option>
+            <option value="Ramp">Auto: Ramp Generator</option>
           </select>
           <input type="range" min="0" max="100" step="0.5" value="50" aria-label="${x}" style="width:100%; cursor:pointer;">
         `);
         const r = d.querySelector('input');
         const b = d.querySelector('.val-pill');
+        const sel = d.querySelector('select');
+
         r.oninput = () => {
+          s.G[x] = 'Manual';
+          sel.value = 'Manual';
           s.V[x] = +r.value;
           b.textContent = r.value;
           L(`SET Me.${x} = ${r.value}`);
         };
-        d.querySelector('select').onchange = (e) => {
+
+        sel.onchange = (e) => {
           s.G[x] = e.target.value;
           L(`GEN Me.${x} -> ${e.target.value}`);
         };
+
         s.ui[x] = (v) => {
           r.value = v;
           b.textContent = v;
@@ -290,7 +296,7 @@ const Sim = (() => {
       const d = row(`
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div>
-            <strong style="color:#cbd5e1;">${x}</strong>
+            <strong style="color:#cbd5e1;" title="Controlled Output">${x}</strong>
             <small style="color:#94a3b8; margin-left:4px;">(out)</small>
           </div>
           ${
