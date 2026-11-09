@@ -1,4 +1,4 @@
-const V = 'wcs-v9';
+const V = 'wcs-v10';
 const ASSETS = [
   './',
   'index.html',
