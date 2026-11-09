@@ -3,7 +3,6 @@
  * Supports InTouch QuickScript, ArchestrA C#, Historian SQL, Siemens SCL, Rockwell ST, and Modbus CSV.
  */
 
-// Exclusion set: filters out C#, JS, and SCADA runtime methods from being detected as physical tags
 const SYSTEM_KEYWORDS = new Set([
   'convert', 'todouble', 'toint32', 'toboolean', 'tostring',
   'math', 'pi', 'pow', 'max', 'min', 'abs', 'sign', 'round',
@@ -25,31 +24,24 @@ const isPhysicalTag = (t) => {
 };
 
 const TagTools = {
-  // Safe dialect detector
   _lang: (c) => (/\b(THEN|ENDIF|ENDWHILE)\b/i.test(c) ? 'qs' : 'cs'),
 
-  // Safe tag extraction and type resolution
   extract(code, lang) {
     if (!code || !code.trim()) return [];
     lang = lang || TagTools._lang(code);
     
-    // Fallback if Sim analyzer is not ready
     const simAnalysis = (typeof Sim !== 'undefined' && Sim.analyze) 
       ? Sim.analyze(code, lang) 
       : { tags: [], outputs: new Set() };
-
-    const plain = code.replace(/\bMe\./g, '');
 
     return simAnalysis.tags
       .filter(isPhysicalTag)
       .map((t) => {
         const raw = t.replace(/^Me\./i, '');
         const escaped = raw.replace(/\./g, '\\.');
-        const re = new RegExp('(?<![\\w."])' + escaped + '(?!\\w)');
         const isArchestrA = new RegExp('(?<![\\w.])Me\\.' + escaped + '(?!\\w)').test(code);
         const shown = isArchestrA ? 'Me.' + raw : raw;
 
-        // Determine SCADA Data Type using universal validator logic
         let resolvedType = 'Real';
         if (typeof tagKind === 'function') {
           const k = tagKind(raw);
@@ -59,7 +51,6 @@ const TagTools = {
           resolvedType = isDisc ? 'Discrete' : (/(Timer|Stage|Mode|Count|Phase|Step)/i.test(raw) ? 'Integer' : 'Real');
         }
 
-        // Check if tag is actively assigned to (Output/Write)
         const isAssigned = new RegExp('(?<![\\w.])' + (isArchestrA ? 'Me\\.' : '') + escaped + '\\s*(?::=|=(?!=))').test(code);
         const mode = (simAnalysis.outputs && simAnalysis.outputs.has(raw)) || isAssigned ? 'Write' : 'Read';
 
@@ -73,7 +64,6 @@ const TagTools = {
       });
   },
 
-  // Add ArchestrA 'Me.' qualifier cleanly without creating Me.Me. duplicates
   toSP(code, lang) {
     if (!code) return '';
     lang = lang || TagTools._lang(code);
@@ -81,7 +71,6 @@ const TagTools = {
     const keep = [];
     const placeholder = (x) => '\u0003' + (keep.push(x) - 1) + '\u0003';
 
-    // Mask strings and comments
     let c = code
       .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, placeholder)
       .replace(/\/\/.*/g, placeholder)
@@ -96,7 +85,6 @@ const TagTools = {
       .map((t) => t.replace(/^Me\./i, ''))
       .sort((a, b) => b.length - a.length)
       .forEach((t) => {
-        // Lookbehind prevents Me.Me duplicate prefixing
         const re = new RegExp('(?<![\\w."#])(?<!Me\\.)' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
         c = c.replace(re, 'Me.' + t);
       });
@@ -104,13 +92,11 @@ const TagTools = {
     return c.replace(/\u0003(\d+)\u0003/g, (m, i) => keep[i]);
   },
 
-  // Strip ArchestrA 'Me.' for InTouch Flat Tag Dictionary
   toInTouch(code) {
     if (!code) return '';
     return code.replace(/(?<![\w.])Me\./g, '');
   },
 
-  // InTouch QuickScript -> ArchestrA C#
   qsToCs(code) {
     if (!code) return '';
     const comments = [];
@@ -124,13 +110,11 @@ const TagTools = {
         .replace(/\bNOT\b/gi, '!')
         .replace(/(?<![<>!=:])=(?!=)/g, '==');
 
-    // 1. Preserve comments and transform them into C# format
     let c = code.replace(/\{([\s\S]*?)\}/g, (m, x) => {
       const lines = x.split('\n').map((l) => '// ' + l.trim());
       return placeholder(lines.join('\n'));
     });
 
-    // 2. Syntax replacements
     c = c
       .replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi, (m, x) => 'if (' + convertCond(x.trim()) + ') {')
       .replace(/\bELSE\b/gi, '} else {')
@@ -145,7 +129,6 @@ const TagTools = {
         return (types[t.toUpperCase()] || 'double') + ' ' + n + ';';
       });
 
-    // 3. Prefix tags safely with Me.
     const tags = (typeof Sim !== 'undefined' && Sim.analyze) ? Sim.analyze(code, 'qs').tags : [];
     [...tags]
       .filter(isPhysicalTag)
@@ -159,7 +142,6 @@ const TagTools = {
     return c.replace(/\u0003(\d+)\u0003/g, (m, i) => comments[i]);
   },
 
-  // ArchestrA C# -> InTouch QuickScript
   csToQs(code) {
     if (!code) return '';
     const comments = [];
@@ -173,7 +155,6 @@ const TagTools = {
         .replace(/!(?!=)/g, ' NOT ')
         .replace(/==/g, ' = ');
 
-    // 1. Strip Me. and preserve comments
     let c = code
       .replace(/\bMe\./g, '')
       .replace(/\/\/(.*)$/gm, (m, x) => placeholder('{ ' + x.trim() + ' }'))
@@ -183,7 +164,6 @@ const TagTools = {
       ? '{ NOTE: Math functions and ternary (? :) operators require manual QuickScript adjustment }\n'
       : '';
 
-    // 2. Syntax replacements
     c = c
       .replace(/\bif\s*\(([^)]+)\)\s*\{/gi, (m, x) => 'IF ' + convertCond(x.trim()) + ' THEN')
       .replace(/\}\s*else\s*\{/gi, 'ELSE')
@@ -203,7 +183,6 @@ const TagTools = {
   }
 };
 
-// ---- Industrial PLC Exporter: SCL (TIA Portal), Rockwell ST, Modbus CSV ----
 const PLC = (() => {
   const TY = { BOOL: 'Bool', REAL: 'Real', DINT: 'DInt' };
   const D = { INTEGER: 'DINT', REAL: 'REAL', DISCRETE: 'BOOL' };
@@ -230,17 +209,14 @@ const PLC = (() => {
     }
     c = c.replace(/\/\/.*/g, save).replace(/\/\*[\s\S]*?\*\//g, save).replace(/\bMe\./g, '');
 
-    // Ternary operator conversion
     c = c.replace(/([\w.]+)\s*(\+?=)\s*([^?;]+?)\s*\?\s*([^:;]+)\s*:\s*([^;]+);/g, 'IF $3 THEN\n    $1 $2 $4;\nELSE\n    $1 $2 $5;\nEND_IF;');
 
-    // Variable declarations
     c = c
       .replace(/\b(double|float|var)\s+(\w+)\s*=/g, (m, t, n) => { loc[n] = 'REAL'; return n + ' :='; })
       .replace(/\bint\s+(\w+)\s*=/g, (m, n) => { loc[n] = 'DINT'; return n + ' :='; })
       .replace(/\bbool\s+(\w+)\s*=/g, (m, n) => { loc[n] = 'BOOL'; return n + ' :='; })
       .replace(/\bDIM\s+(\w+)\s+AS\s+(\w+)\s*;?/gi, (m, n, t) => { loc[n] = D[t.toUpperCase()] || 'REAL'; return ''; });
 
-    // Conditional statements
     if (lang === 'cs') {
       c = c
         .replace(/\bif\s*\(([^)]+)\)\s*\{/g, 'IF $1 THEN')
@@ -262,7 +238,6 @@ const PLC = (() => {
       .replace(/(?<![<>:=])=(?!=)/g, ':=')
       .replace(/\u0001/g, '=');
 
-    // Math conversions
     c = c
       .replace(/Math\.PI\b/g, '3.14159265')
       .replace(/Math\.Pow\(([^,]+),([^)]+)\)/g, tgt === 'scl' ? 'EXPT($1, $2)' : '(($1) ** ($2))')
@@ -275,7 +250,6 @@ const PLC = (() => {
         return fn.toUpperCase() + `(${p1}, ${p2})`;
       });
 
-    // Tag substitutions
     const cleanTags = [...a.tags].filter(isPhysicalTag).map((t) => t.replace(/^Me\./i, ''));
     cleanTags.sort((x, y) => y.length - x.length).forEach((t) => {
       const re = new RegExp('(?<![\\w."#])' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
@@ -385,7 +359,6 @@ END_FUNCTION_BLOCK`
       };
     }
 
-    // Rockwell Studio 5000 Structured Text
     return {
       ext: 'st',
       mime: 'text/plain',
@@ -408,7 +381,6 @@ ${b.text}`
   return { convert };
 })();
 
-// ---- Language Switcher Handlers ----
 (function () {
   const sqlTags = (c) => [...new Set((c.match(/'([\w.]+)'/g) || []).map((x) => x.slice(1, -1)))];
 
