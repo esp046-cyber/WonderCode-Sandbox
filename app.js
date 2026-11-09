@@ -1,6 +1,6 @@
 /**
  * WonderCode Sandbox - Core Application Controller
- * Handles application lifecycle, tabs, templates, modals, and exports.
+ * Handles application lifecycle, tabs, templates, guided tour, and exports.
  */
 
 const EXT = { qs: '.scp', cs: '.aaScript', sql: '.sql' };
@@ -296,6 +296,84 @@ if (tplContainer && typeof TEMPLATES !== 'undefined') {
   });
 }
 
+// ==========================================================================
+// RESTORED: Help / Guided Tour Functionality for Non-Coders
+// ==========================================================================
+const STEPS = [
+  ['1/3 · Industrial Templates', 'Click any template on the left (e.g., "HH alarm ESD interlock" or "Chiller sequencing") to load verified, ready-to-use SCADA logic.', '#L', 'dl'],
+  ['2/3 · Instant Validator', 'The right sidebar checks your syntax in real time. It catches missing semicolons, unclosed IF/ENDIF blocks, and incorrect tag names automatically.', '#R', 'dr'],
+  ['3/3 · Live Process Simulator', 'Scroll to Simulator on the right panel: drag the tank level or temperature sliders to see pumps start and emergency valves trip live!', '#sim', 'dr']
+];
+
+let tourIdx = 0;
+const welcomeDlg = $('#welcome');
+
+function clearTour() {
+  document.querySelectorAll('.spot').forEach((el) => el.classList.remove('spot'));
+  document.body.classList.remove('dl', 'dr');
+}
+
+function showStep(idx) {
+  tourIdx = idx;
+  const s = STEPS[idx];
+  clearTour();
+
+  if (s[3]) document.body.classList.add(s[3]);
+  const target = $(s[2]);
+  if (target) target.classList.add('spot');
+
+  const tEl = $('#wT');
+  const bEl = $('#wB');
+  const prevBtn = $('#wPrev');
+  const nextBtn = $('#wNext');
+
+  if (tEl) tEl.textContent = s[0];
+  if (bEl) bEl.textContent = s[1];
+  if (prevBtn) prevBtn.disabled = idx === 0;
+  if (nextBtn) nextBtn.textContent = idx === STEPS.length - 1 ? 'Start Exploring' : 'Next Step →';
+}
+
+if ($('#wNext')) {
+  $('#wNext').onclick = () => {
+    if (tourIdx === STEPS.length - 1) {
+      if (welcomeDlg) welcomeDlg.close();
+    } else {
+      showStep(tourIdx + 1);
+    }
+  };
+}
+
+if ($('#wPrev')) $('#wPrev').onclick = () => showStep(tourIdx - 1);
+if ($('#wSkip')) $('#wSkip').onclick = () => { if (welcomeDlg) welcomeDlg.close(); };
+
+if (welcomeDlg) {
+  welcomeDlg.addEventListener('close', () => {
+    clearTour();
+    try { localStorage.setItem('wc_visited', '1'); } catch (_) {}
+  });
+}
+
+// Connect the "? Help / Guided tour" button
+const tourBtn = $('#tour');
+if (tourBtn) {
+  tourBtn.onclick = () => {
+    clearTour();
+    if (welcomeDlg) {
+      welcomeDlg.showModal();
+      showStep(0);
+    }
+  };
+}
+
+// Mobile Viewport Keyboard Fix
+const vv = window.visualViewport;
+if (vv) {
+  const handleVv = () => document.documentElement.style.setProperty('--kb', Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + 'px');
+  vv.addEventListener('resize', handleVv);
+  vv.addEventListener('scroll', handleVv);
+  handleVv();
+}
+
 // Export Handlers
 const fname = (t) => (t && t.name ? t.name : 'script').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'script';
 
@@ -335,3 +413,10 @@ if ($('#exp')) {
 
 // Initial Boot Call
 render();
+
+// Launch Guided Tour on first visit
+try {
+  if (!localStorage.getItem('wc_visited') && tourBtn) {
+    tourBtn.click();
+  }
+} catch (_) {}
