@@ -1,8 +1,8 @@
 /**
- * WonderCode Sandbox - Editor Shell, Simulator Engine & Tab Manager
+ * WonderCode Sandbox - Editor Shell, Simulator Engine & Language Switcher
  */
 
-// Mobile drawers and overflow menu for the editor shell
+// Mobile drawers and overflow menu
 (function () {
   const b = document.body;
   const $ = (s) => document.querySelector(s);
@@ -57,9 +57,8 @@
   });
 })();
 
-// ---- Simulation engine: converts QuickScript / C# to JS and runs it against a tag store ----
+// Simulation Engine
 const Sim = (() => {
-  // Disallowed system keywords, classes, and types that must NEVER be treated as factory tags
   const KW = new Set(
     'IF THEN ELSE ENDIF AND OR NOT WHILE ENDWHILE DIM AS INTEGER REAL DISCRETE MESSAGE DOUBLE INT BOOL VAR FLOAT MATH TRUE FALSE LOGMESSAGE INTEGERROUND NULL RETURN STRING DECIMAL LONG CONSOLE SYSTEM SHOW HIDE SHOWWINDOW INFOAPPACTIVE HTGETTIME WSOPTICAL FOR TO NEXT DO NEW CONVERT TODOUBLE TOINT32 TOBOOLEAN TOSTRING POW MAX MIN ABS SIGN ROUND FLOOR CEILING SQRT ME MYENGINE MYPLATFORM'.split(' ')
   );
@@ -75,10 +74,8 @@ const Sim = (() => {
     const loc = new Set();
     const tags = [];
 
-    // Identify local variable declarations
     c.replace(/\b(?:DIM|double|int|bool|var|float|string|decimal|long)\s+(\w+)/gi, (m, n) => loc.add(n));
 
-    // Extract identifier tokens and filter out non-physical programming methods
     c.replace(/(?<![\w.])[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*/g, (m) => {
       const f = m.split('.')[0].toUpperCase();
       const sub = m.includes('.') ? m.split('.')[1].toUpperCase() : '';
@@ -98,7 +95,6 @@ const Sim = (() => {
   function toJS(code, lang, tags) {
     let c = strip(code, lang);
 
-    // Bind physical tags to simulator state object T
     [...tags]
       .sort((a, b) => b.length - a.length)
       .forEach((t) => {
@@ -141,7 +137,7 @@ const Sim = (() => {
   return { analyze, toJS };
 })();
 
-// ---- Simulator UI: sliders, signal generators, fault toggles, timestamped log ----
+// Simulator UI & Event Loop
 (function () {
   const $ = (s) => document.querySelector(s);
   const logEl = $('#log');
@@ -178,7 +174,6 @@ const Sim = (() => {
     if (runBtn) runBtn.textContent = 'Simulate';
   };
 
-  // Helper to determine discrete status safely
   const isDiscTag = (tagName) => {
     if (typeof tagKind === 'function') {
       const k = tagKind(tagName);
@@ -240,10 +235,8 @@ const Sim = (() => {
       return d;
     };
 
-    // Render Process Inputs
     s.ins.forEach((x) => {
       if (isDiscTag(x)) {
-        // Discrete on/off toggle button
         const d = row(`
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <strong style="color:#cbd5e1;">${x}</strong>
@@ -262,7 +255,6 @@ const Sim = (() => {
           L(`INJECT Me.${x} = ${s.V[x]}`);
         };
       } else {
-        // Analog measurement slider with distinct value badge
         const d = row(`
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <strong style="color:#cbd5e1;">${x}</strong>
@@ -293,7 +285,6 @@ const Sim = (() => {
       }
     });
 
-    // Render Process Outputs
     s.outs.forEach((x) => {
       const isDisc = isDiscTag(x);
       const d = row(`
@@ -328,7 +319,6 @@ const Sim = (() => {
     return s;
   }
 
-  // Refresh and initialize simulator controls
   window.initSimulator = () => {
     stop();
     LOG = [];
@@ -389,7 +379,6 @@ const Sim = (() => {
     };
   }
 
-  // PLC exporter dialog
   const dlg = $('#plcDlg');
   const out = $('#plcOut');
   let R = { text: '', ext: 'txt', mime: 'text/plain' };
@@ -428,70 +417,7 @@ const Sim = (() => {
   }
 })();
 
-// ---- Tab management: unique names, close confirmation, undo toast ----
-const uniq = (n, skip) => {
-  if (typeof S === 'undefined' || !S.tabs) return n;
-  const x = S.tabs.filter((t) => t.id !== skip).map((t) => t.name);
-  if (!x.includes(n)) return n;
-  let i = 1;
-  while (x.includes(`${n} (${i})`)) i++;
-  return `${n} (${i})`;
-};
-
-const isEdited = (t) => t.code.trim() !== '' && t.code !== (t.orig ?? '');
-
-function addTab(name, lang, code) {
-  if (typeof S === 'undefined' || !S.tabs) return;
-  const id = Date.now();
-  S.tabs.push({ id, name: uniq(name), lang: lang || 'qs', code: code || '', orig: code || '' });
-  S.cur = id;
-  if (typeof render === 'function') render();
-  if (typeof save === 'function') save();
-}
-
-let toastT;
-function toast(msg, label, fn) {
-  const t = document.getElementById('toast');
-  if (!t) return;
-  t.innerHTML = '';
-  const s = document.createElement('span');
-  s.textContent = msg;
-  t.append(s);
-  if (label) {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.onclick = () => {
-      fn();
-      t.hidden = true;
-    };
-    t.append(b);
-  }
-  t.hidden = false;
-  clearTimeout(toastT);
-  toastT = setTimeout(() => (t.hidden = true), 7000);
-}
-
-function closeTab(id) {
-  if (typeof S === 'undefined' || S.tabs.length < 2) {
-    return toast('Cannot close the last tab.');
-  }
-  const i = S.tabs.findIndex((x) => x.id === id);
-  const t = S.tabs[i];
-  if (isEdited(t) && !confirm(`"${t.name}" has unsaved edits. Close it anyway?`)) return;
-
-  S.tabs.splice(i, 1);
-  if (S.cur === id) S.cur = S.tabs[Math.min(i, S.tabs.length - 1)].id;
-  if (typeof render === 'function') render();
-  if (typeof save === 'function') save();
-  toast(`Closed "${t.name}"`, 'Undo', () => {
-    S.tabs.splice(i, 0, t);
-    S.cur = t.id;
-    if (typeof render === 'function') render();
-    if (typeof save === 'function') save();
-  });
-}
-
-// ---- Language dropdown modal handler ----
+// Language dropdown conversion dialog
 (function () {
   const $ = (s) => document.querySelector(s);
   const dlg = $('#langDlg');
