@@ -3,6 +3,27 @@
  * Supports InTouch QuickScript, ArchestrA C#, Historian SQL, Siemens SCL, Rockwell ST, and Modbus CSV.
  */
 
+// Exclusion set: filters out C#, JS, and SCADA runtime methods from being detected as physical tags
+const SYSTEM_KEYWORDS = new Set([
+  'convert', 'todouble', 'toint32', 'toboolean', 'tostring',
+  'math', 'pi', 'pow', 'max', 'min', 'abs', 'sign', 'round',
+  'console', 'thread', 'sleep', 'datetime', 'timespan',
+  'string', 'double', 'int', 'bool', 'float', 'void', 'null',
+  'me', 'myengine', 'myplatform'
+]);
+
+const isPhysicalTag = (t) => {
+  if (!t || typeof t !== 'string') return false;
+  const clean = t.replace(/^Me\./i, '').trim();
+  const parts = clean.split('.');
+  const root = parts[0].toLowerCase();
+  const sub = parts[1] ? parts[1].toLowerCase() : '';
+  
+  if (SYSTEM_KEYWORDS.has(root) || SYSTEM_KEYWORDS.has(sub)) return false;
+  if (/^(convert|math|system|console)$/i.test(root)) return false;
+  return true;
+};
+
 const TagTools = {
   // Safe dialect detector
   _lang: (c) => (/\b(THEN|ENDIF|ENDWHILE)\b/i.test(c) ? 'qs' : 'cs'),
@@ -19,37 +40,40 @@ const TagTools = {
 
     const plain = code.replace(/\bMe\./g, '');
 
-    return simAnalysis.tags.map((t) => {
-      const escaped = t.replace(/\./g, '\\.');
-      const re = new RegExp('(?<![\\w."])' + escaped + '(?!\\w)');
-      const isArchestrA = new RegExp('(?<![\\w.])Me\\.' + escaped + '(?!\\w)').test(code);
-      const shown = isArchestrA ? 'Me.' + t : t;
+    return simAnalysis.tags
+      .filter(isPhysicalTag)
+      .map((t) => {
+        const raw = t.replace(/^Me\./i, '');
+        const escaped = raw.replace(/\./g, '\\.');
+        const re = new RegExp('(?<![\\w."])' + escaped + '(?!\\w)');
+        const isArchestrA = new RegExp('(?<![\\w.])Me\\.' + escaped + '(?!\\w)').test(code);
+        const shown = isArchestrA ? 'Me.' + raw : raw;
 
-      // Determine SCADA Data Type using universal validator logic
-      let resolvedType = 'Real';
-      if (typeof tagKind === 'function') {
-        const k = tagKind(t);
-        resolvedType = (k === 'digital' || k === 'Discrete') ? 'Discrete' : (k === 'Integer' ? 'Integer' : 'Real');
-      } else {
-        const isDisc = /(Alarm|Trip|Fault|Interlock|\.Sw$|_Sw$|Slip|Fb$|_Fb$|Status|Auto|Enable|Reset|Open|Close|Start|Stop|Divert|Flush|Complete|Done|Tare_Cmd|Dose_Run|Run_Cmd|Lag_Cmd|\.Cmd$|_Cmd$|Run$|_Close$|_Open$)/i.test(t);
-        resolvedType = isDisc ? 'Discrete' : (/(Timer|Stage|Mode|Count|Phase|Step)/i.test(t) ? 'Integer' : 'Real');
-      }
+        // Determine SCADA Data Type using universal validator logic
+        let resolvedType = 'Real';
+        if (typeof tagKind === 'function') {
+          const k = tagKind(raw);
+          resolvedType = (k === 'digital' || k === 'Discrete') ? 'Discrete' : (k === 'Integer' ? 'Integer' : 'Real');
+        } else {
+          const isDisc = /(Alarm|Trip|Fault|Interlock|\.Sw$|_Sw$|Slip|Fb$|_Fb$|Status|Auto|Enable|Reset|Open|Close|Start|Stop|Divert|Flush|Complete|Done|Tare_Cmd|Dose_Run|Run_Cmd|Lag_Cmd|\.Cmd$|_Cmd$|Run$|_Close$|_Open$)/i.test(raw);
+          resolvedType = isDisc ? 'Discrete' : (/(Timer|Stage|Mode|Count|Phase|Step)/i.test(raw) ? 'Integer' : 'Real');
+        }
 
-      // Check if tag is actively assigned to (Output/Write)
-      const isAssigned = new RegExp('(?<![\\w.])' + (isArchestrA ? 'Me\\.' : '') + escaped + '\\s*(?::=|=(?!=))').test(code);
-      const mode = (simAnalysis.outputs && simAnalysis.outputs.has(t)) || isAssigned ? 'Write' : 'Read';
+        // Check if tag is actively assigned to (Output/Write)
+        const isAssigned = new RegExp('(?<![\\w.])' + (isArchestrA ? 'Me\\.' : '') + escaped + '\\s*(?::=|=(?!=))').test(code);
+        const mode = (simAnalysis.outputs && simAnalysis.outputs.has(raw)) || isAssigned ? 'Write' : 'Read';
 
-      return {
-        name: shown,
-        rawName: t.replace(/^Me\./i, ''),
-        type: resolvedType,
-        mode: mode,
-        direction: mode === 'Write' ? 'OUT' : 'IN'
-      };
-    });
+        return {
+          name: shown,
+          rawName: raw,
+          type: resolvedType,
+          mode: mode,
+          direction: mode === 'Write' ? 'OUT' : 'IN'
+        };
+      });
   },
 
-  // Add ArchestrA 'Me.' qualifier without breaking keywords, methods, strings, or numbers
+  // Add ArchestrA 'Me.' qualifier cleanly without creating Me.Me. duplicates
   toSP(code, lang) {
     if (!code) return '';
     lang = lang || TagTools._lang(code);
@@ -57,7 +81,7 @@ const TagTools = {
     const keep = [];
     const placeholder = (x) => '\u0003' + (keep.push(x) - 1) + '\u0003';
 
-    // Mask string literals, comments, and existing Me. references
+    // Mask strings and comments
     let c = code
       .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, placeholder)
       .replace(/\/\/.*/g, placeholder)
@@ -68,9 +92,11 @@ const TagTools = {
     }
 
     [...tags]
+      .filter(isPhysicalTag)
+      .map((t) => t.replace(/^Me\./i, ''))
       .sort((a, b) => b.length - a.length)
       .forEach((t) => {
-        // Only target bare identifiers (not preceded by Me., Math., System., or a dot)
+        // Lookbehind prevents Me.Me duplicate prefixing
         const re = new RegExp('(?<![\\w."#])(?<!Me\\.)' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
         c = c.replace(re, 'Me.' + t);
       });
@@ -90,7 +116,6 @@ const TagTools = {
     const comments = [];
     const placeholder = (x) => '\u0003' + (comments.push(x) - 1) + '\u0003';
 
-    // Helper to convert conditional expressions
     const convertCond = (str) =>
       str
         .replace(/<>/g, '!=')
@@ -120,9 +145,11 @@ const TagTools = {
         return (types[t.toUpperCase()] || 'double') + ' ' + n + ';';
       });
 
-    // 3. Prefix with Me.
+    // 3. Prefix tags safely with Me.
     const tags = (typeof Sim !== 'undefined' && Sim.analyze) ? Sim.analyze(code, 'qs').tags : [];
     [...tags]
+      .filter(isPhysicalTag)
+      .map((t) => t.replace(/^Me\./i, ''))
       .sort((a, b) => b.length - a.length)
       .forEach((t) => {
         const re = new RegExp('(?<![\\w."#])(?<!Me\\.)' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
@@ -146,14 +173,14 @@ const TagTools = {
         .replace(/!(?!=)/g, ' NOT ')
         .replace(/==/g, ' = ');
 
-    // 1. Strip Me. and preserve comments into { comment } format
+    // 1. Strip Me. and preserve comments
     let c = code
       .replace(/\bMe\./g, '')
       .replace(/\/\/(.*)$/gm, (m, x) => placeholder('{ ' + x.trim() + ' }'))
       .replace(/\/\*([\s\S]*?)\*\//g, (m, x) => placeholder('{ ' + x.trim() + ' }'));
 
-    const warn = /Math\.|\?[^:\n]*:/.test(c) 
-      ? '{ NOTE: Math functions and ternary (? :) operators require manual QuickScript adjustment }\n' 
+    const warn = /Math\.|\?[^:\n]*:/.test(c)
+      ? '{ NOTE: Math functions and ternary (? :) operators require manual QuickScript adjustment }\n'
       : '';
 
     // 2. Syntax replacements
@@ -170,8 +197,6 @@ const TagTools = {
       .replace(/\bfalse\b/gi, '0');
 
     c = convertCond(c);
-
-    // Clean up redundant double-ENDIFs from nested block cleanup
     c = c.replace(/ELSE\s+ENDIF;/g, 'ELSE');
 
     return warn + c.replace(/\u0003(\d+)\u0003/g, (m, i) => comments[i]);
@@ -205,8 +230,8 @@ const PLC = (() => {
     }
     c = c.replace(/\/\/.*/g, save).replace(/\/\*[\s\S]*?\*\//g, save).replace(/\bMe\./g, '');
 
-    // Convert Ternary conditionals: var = cond ? val1 : val2; -> IF-THEN-ELSE
-    c = c.replace(/([\w.]+)\s*(\+?=)\s*([^?;]+?)\s*\?\s*([^:;]+)\s*:\s*([^;]+);/g, 'IF $3 THEN\n    $1 $2 $4;\nELSE\n    $1 $2 $5;\nENDIF;');
+    // Ternary operator conversion
+    c = c.replace(/([\w.]+)\s*(\+?=)\s*([^?;]+?)\s*\?\s*([^:;]+)\s*:\s*([^;]+);/g, 'IF $3 THEN\n    $1 $2 $4;\nELSE\n    $1 $2 $5;\nEND_IF;');
 
     // Variable declarations
     c = c
@@ -237,22 +262,25 @@ const PLC = (() => {
       .replace(/(?<![<>:=])=(?!=)/g, ':=')
       .replace(/\u0001/g, '=');
 
-    // Math replacements
+    // Math conversions
     c = c
       .replace(/Math\.PI\b/g, '3.14159265')
       .replace(/Math\.Pow\(([^,]+),([^)]+)\)/g, tgt === 'scl' ? 'EXPT($1, $2)' : '(($1) ** ($2))')
-      .replace(/Math\.(Max|Min|Abs)\(/g, (m, f) => {
-        if (tgt === 'st' && f !== 'Abs') warn.add('Rockwell ST: Use LIM or inline CMP logic for MAX/MIN');
-        return f.toUpperCase() + '(';
+      .replace(/Math\.Abs\(([^)]+)\)/g, 'ABS($1)')
+      .replace(/Math\.(Max|Min)\(([^,]+),([^)]+)\)/g, (m, fn, p1, p2) => {
+        if (tgt === 'st') {
+          warn.add('Rockwell ST: Nested MAX/MIN replaced with inline comparison');
+          return fn === 'Max' ? `(IF (${p1} > ${p2}) THEN ${p1} ELSE ${p2} END_IF)` : `(IF (${p1} < ${p2}) THEN ${p1} ELSE ${p2} END_IF)`;
+        }
+        return fn.toUpperCase() + `(${p1}, ${p2})`;
       });
 
-    // Prefix tags with '#' in Siemens SCL local block interface
-    [...a.tags]
-      .sort((x, y) => y.length - x.length)
-      .forEach((t) => {
-        const re = new RegExp('(?<![\\w."#])' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
-        c = c.replace(re, tgt === 'scl' ? '#' + nm(t) : nm(t));
-      });
+    // Tag substitutions
+    const cleanTags = [...a.tags].filter(isPhysicalTag).map((t) => t.replace(/^Me\./i, ''));
+    cleanTags.sort((x, y) => y.length - x.length).forEach((t) => {
+      const re = new RegExp('(?<![\\w."#])' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
+      c = c.replace(re, tgt === 'scl' ? '#' + nm(t) : nm(t));
+    });
 
     if (tgt === 'scl') {
       Object.keys(loc).forEach((n) => {
@@ -275,9 +303,11 @@ const PLC = (() => {
       ['Tag Name', 'ArchestrA Attribute', 'Direction', 'Data Type', 'Modbus Table', 'Address', 'Zero-Based Offset', 'Length (Words)', 'Byte Order / Scaling']
     ];
 
-    a.tags.forEach((t) => {
-      const isOut = a.outputs.has(t);
-      const isBool = kind(t) === 'BOOL';
+    const cleanTags = a.tags.filter(isPhysicalTag);
+    cleanTags.forEach((t) => {
+      const raw = t.replace(/^Me\./i, '');
+      const isOut = a.outputs.has(raw);
+      const isBool = kind(raw) === 'BOOL';
       let table, addr, words;
 
       if (isBool) {
@@ -294,8 +324,8 @@ const PLC = (() => {
       const offset = addr - ({ 'Coil (0x)': 1, 'Discrete Input (1x)': 10001, 'Input Register (3x)': 30001, 'Holding Register (4x)': 40001 }[table]);
 
       rows.push([
-        nm(t),
-        'Me.' + t,
+        nm(raw),
+        'Me.' + raw,
         isOut ? 'Output (PLC to SCADA)' : 'Input (SCADA to PLC)',
         isBool ? 'BOOL' : 'FLOAT32 (Real)',
         table,
@@ -322,8 +352,9 @@ const PLC = (() => {
 
     const b = body(code, lang, tgt, a);
     const dec = (arr, fn) => arr.map(fn).join('\n');
-    const ins = a.tags.filter((t) => !a.outputs.has(t));
-    const outs = a.tags.filter((t) => a.outputs.has(t));
+    const validTags = a.tags.filter(isPhysicalTag).map((t) => t.replace(/^Me\./i, ''));
+    const ins = validTags.filter((t) => !a.outputs.has(t));
+    const outs = validTags.filter((t) => a.outputs.has(t));
 
     const warnBlock = b.warn.length ? `\n// WARNING: ${b.warn.join('; ')}\n` : '';
 
@@ -381,10 +412,12 @@ ${b.text}`
 (function () {
   const sqlTags = (c) => [...new Set((c.match(/'([\w.]+)'/g) || []).map((x) => x.slice(1, -1)))];
 
-  const toSql = (tags, src) =>
-    tags.length
-      ? `-- Generated Historian Query for ${src} tags\nSELECT DateTime, TagName, Value, Quality\nFROM History\nWHERE TagName IN (${tags.map((t) => `'${t}'`).join(', ')})\n  AND DateTime >= DATEADD(hh, -24, GETDATE())\nORDER BY DateTime DESC;\n`
+  const toSql = (tags, src) => {
+    const validTags = tags.filter(isPhysicalTag).map((t) => t.replace(/^Me\./i, ''));
+    return validTags.length
+      ? `-- Generated Historian Query for ${src} tags\nSELECT DateTime, TagName, Value, Quality\nFROM History\nWHERE TagName IN (${validTags.map((t) => `'${t}'`).join(', ')})\n  AND DateTime >= DATEADD(hh, -24, GETDATE())\nORDER BY DateTime DESC;\n`
       : `-- No tags identified in the ${src} editor to query.\n`;
+  };
 
   const same = (c) => c;
 
@@ -397,8 +430,6 @@ ${b.text}`
     qssql: (c) => toSql((typeof Sim !== 'undefined' ? Sim.analyze(c, 'qs').tags : []), 'InTouch QuickScript'),
     cssql: (c) => toSql((typeof Sim !== 'undefined' ? Sim.analyze(c, 'cs').tags : []), 'ArchestrA C#'),
 
-    // FIXED: Non-destructive tag query conversion.
-    // Instead of wiping out logic with mirror assignments, it leaves comments and inserts safe reference declarations.
     sqlqs: (c) => {
       const tags = sqlTags(c);
       if (!tags.length) return '{ No quoted tag names found in SQL. }\n';
