@@ -29,6 +29,7 @@ function tagKind(n) {
 function detectDialect(code, lang) {
   if (!code || !code.trim()) return null;
 
+  // Strip comments and strings before evaluating syntax
   const cleanCode = code
     .replace(/\{[\s\S]*?\}/g, ' ')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
@@ -36,19 +37,25 @@ function detectDialect(code, lang) {
     .replace(/"(?:[^"\\]|\\.)*"/g, '""');
 
   if (lang === 'cs') {
+    // QuickScript-exclusive block terminators inside C# mode
     if (/\b(THEN|ENDIF|ENDWHILE)\b/i.test(cleanCode)) {
       return {
         title: 'Wrong Language Mode Selected',
-        tip: 'This script contains QuickScript keywords (like "THEN" or "ENDIF"). Switch the dropdown above to "QuickScript" to test this code.'
+        tip: 'This script contains QuickScript keywords (like "THEN" or "ENDIF"). Switch the language dropdown to "QuickScript".'
       };
     }
   }
 
   if (lang === 'qs') {
-    if (/\b(?:double|bool|int|string|var)\s+\w+\s*=|\bif\s*\(|\bMath\./i.test(cleanCode)) {
+    // FIXED: Only flag true C# syntax (typed declarations or if (...) { with curly brace), NOT QuickScript IF (...) THEN
+    const hasCSharpKeywords = /\b(?:double|float|int|bool|string|var)\s+[A-Za-z_]\w*\s*=/i.test(cleanCode);
+    const hasCSharpIfBrace = /\bif\s*\([^)]+\)\s*\{/i.test(cleanCode);
+    const hasMathNamespace = /\bMath\.(Pow|Max|Min|Abs|Round|Sign|PI)\b/.test(cleanCode);
+
+    if (hasCSharpKeywords || hasCSharpIfBrace || hasMathNamespace) {
       return {
         title: 'Wrong Language Mode Selected',
-        tip: 'This script contains C# code (such as "double", "Math.", or "if ()"). Switch the dropdown above to "C#" to test this code.'
+        tip: 'This script contains C# code (e.g., "double", "Math.", or "if () {"). Switch the language dropdown above to "C#".'
       };
     }
   }
@@ -72,7 +79,7 @@ function validate(code, lang) {
   };
 
   if (!code.trim()) {
-    add(1, 'info', 'Sandbox is Empty', 'Select an industrial template on the left panel to load working SCADA logic.');
+    add(1, 'info', 'Sandbox is Empty', 'Select an AGAC template from the left sidebar to load an industrial process routine.');
     return out;
   }
 
