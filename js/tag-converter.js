@@ -1,98 +1,418 @@
-const TagTools={
-  _lang:c=>/\b(THEN|ENDIF)\b/i.test(c)?'qs':'cs',
-  // [{name,type,mode}] for every tag: dotted (LIT.PV) and single-word (Diameter_m), with or without Me.
-  extract(code,lang){
-    lang=lang||TagTools._lang(code);const a=Sim.analyze(code,lang),plain=code.replace(/\bMe\./g,'');
-    return a.tags.map(t=>{const e=t.replace(/\./g,'\\.'),re=new RegExp('(?<![\\w."])'+e+'(?!\\w)');
-      const shown=new RegExp('(?<![\\w.])Me\\.'+e+'(?!\\w)').test(code)?'Me.'+t:t;
-      const dis=tagKind(t)==='digital'||new RegExp('(?<![\\w.])'+e+'\\s*(?::=|=(?!=))\\s*[01]\\s*;').test(plain);
-      const real=plain.split('\n').some(l=>re.test(l)&&/\d+\.\d+/.test(l))||/\.PV$|_SP$|Temp|Flow|Speed|Level|Weight|Volume|Diameter|kW/i.test(t);
-      return {name:shown,type:dis?'Discrete':real?'Real':'Integer',mode:a.outputs.has(t)?'Write':'Read'}})},
-  // Adds Me. to every tag (dotted or single-word); skips locals, Math/System, strings, comments and existing Me.
-  toSP(code,lang){
-    lang=lang||TagTools._lang(code);const tags=Sim.analyze(code,lang).tags,keep=[],st=x=>'\u0003'+(keep.push(x)-1)+'\u0003';
-    let c=code.replace(/"[^"]*"/g,st).replace(/\/\/.*/g,st);if(lang==='qs')c=c.replace(/\{[^}]*\}/g,st);
-    [...tags].sort((x,y)=>y.length-x.length).forEach(t=>{c=c.replace(new RegExp('(?<![\\w."])'+t.replace(/\./g,'\\.')+'(?!\\w)','g'),'Me.'+t)});
-    return c.replace(/\u0003(\d+)\u0003/g,(m,i)=>keep[i])},
-  toInTouch(code){return code.replace(/(?<![\w.])Me\./g,'')}
-  ,
-  // InTouch QuickScript -> ArchestrA C# (comments, IF/ENDIF, operators, DIM, Me. prefix)
-  qsToCs(code){
-    const cm=[],tags=Sim.analyze(code,'qs').tags;
-    const cond=x=>x.replace(/<>/g,'!=').replace(/\bAND\b/gi,'&&').replace(/\bOR\b/gi,'||').replace(/\bNOT\b/gi,'!').replace(/(?<![<>!=:])=(?!=)/g,'==');
-    let c=code.replace(/\{([^}]*)\}/g,(m,x)=>'\u0003'+(cm.push(x.split('\n').map(l=>'// '+l.trim()).join('\n'))-1)+'\u0003')
-      .replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi,(m,x)=>'if ('+cond(x.trim())+') {').replace(/\bELSE\b/gi,'} else {').replace(/\bENDIF\b\s*;?/gi,'}')
-      .replace(/:=/g,'=').replace(/<>/g,'!=').replace(/\bAND\b/gi,'&&').replace(/\bOR\b/gi,'||').replace(/\bNOT\b/gi,'!')
-      .replace(/\bDIM\s+(\w+)\s+AS\s+(\w+)\s*;/gi,(m,n,t)=>(({INTEGER:'int',REAL:'double',DISCRETE:'bool',MESSAGE:'string'})[t.toUpperCase()]||'double')+' '+n+';');
-    [...tags].sort((a,b)=>b.length-a.length).forEach(t=>{c=c.replace(new RegExp('(?<![\\w."])'+t.replace(/\./g,'\\.')+'(?!\\w)','g'),'Me.'+t)});
-    return c.replace(/\u0003(\d+)\u0003/g,(m,i)=>cm[i]);
+/**
+ * WonderCode Sandbox - Tag Extraction, Dialect Translation & PLC Exporter
+ * Supports InTouch QuickScript, ArchestrA C#, Historian SQL, Siemens SCL, Rockwell ST, and Modbus CSV.
+ */
+
+const TagTools = {
+  // Safe dialect detector
+  _lang: (c) => (/\b(THEN|ENDIF|ENDWHILE)\b/i.test(c) ? 'qs' : 'cs'),
+
+  // Safe tag extraction and type resolution
+  extract(code, lang) {
+    if (!code || !code.trim()) return [];
+    lang = lang || TagTools._lang(code);
+    
+    // Fallback if Sim analyzer is not ready
+    const simAnalysis = (typeof Sim !== 'undefined' && Sim.analyze) 
+      ? Sim.analyze(code, lang) 
+      : { tags: [], outputs: new Set() };
+
+    const plain = code.replace(/\bMe\./g, '');
+
+    return simAnalysis.tags.map((t) => {
+      const escaped = t.replace(/\./g, '\\.');
+      const re = new RegExp('(?<![\\w."])' + escaped + '(?!\\w)');
+      const isArchestrA = new RegExp('(?<![\\w.])Me\\.' + escaped + '(?!\\w)').test(code);
+      const shown = isArchestrA ? 'Me.' + t : t;
+
+      // Determine SCADA Data Type using universal validator logic
+      let resolvedType = 'Real';
+      if (typeof tagKind === 'function') {
+        const k = tagKind(t);
+        resolvedType = (k === 'digital' || k === 'Discrete') ? 'Discrete' : (k === 'Integer' ? 'Integer' : 'Real');
+      } else {
+        const isDisc = /(Alarm|Trip|Fault|Interlock|\.Sw$|_Sw$|Slip|Fb$|_Fb$|Status|Auto|Enable|Reset|Open|Close|Start|Stop|Divert|Flush|Complete|Done|Tare_Cmd|Dose_Run|Run_Cmd|Lag_Cmd|\.Cmd$|_Cmd$|Run$|_Close$|_Open$)/i.test(t);
+        resolvedType = isDisc ? 'Discrete' : (/(Timer|Stage|Mode|Count|Phase|Step)/i.test(t) ? 'Integer' : 'Real');
+      }
+
+      // Check if tag is actively assigned to (Output/Write)
+      const isAssigned = new RegExp('(?<![\\w.])' + (isArchestrA ? 'Me\\.' : '') + escaped + '\\s*(?::=|=(?!=))').test(code);
+      const mode = (simAnalysis.outputs && simAnalysis.outputs.has(t)) || isAssigned ? 'Write' : 'Read';
+
+      return {
+        name: shown,
+        rawName: t.replace(/^Me\./i, ''),
+        type: resolvedType,
+        mode: mode,
+        direction: mode === 'Write' ? 'OUT' : 'IN'
+      };
+    });
   },
-  // ArchestrA C# -> InTouch QuickScript (comments, if/}, operators, declarations, no Me.)
-  csToQs(code){
-    const cm=[],cond=x=>x.replace(/&&/g,' AND ').replace(/\|\|/g,' OR ').replace(/!=/g,'<>').replace(/!(?!=)/g,'NOT ');
-    let c=code.replace(/\bMe\./g,'').replace(/\/\/(.*)$/gm,(m,x)=>'\u0003'+(cm.push('{'+x+' }')-1)+'\u0003');
-    const warn=/Math\.|\?[^:\n]*:/.test(c)?'{ Review: Math.* and ?: have no QuickScript translation }\n':'';
-    c=c.replace(/\bif\s*\(([^\n]*)\)\s*\{/g,(m,x)=>'IF '+cond(x.trim())+' THEN').replace(/\}\s*else\s*\{/g,'ELSE').replace(/\}/g,'ENDIF;');
-    c=cond(c).replace(/\b(double|float|int|bool|var)\s+(\w+)\s*=/g,(m,t,n)=>`DIM ${n} AS ${t==='int'?'INTEGER':t==='bool'?'DISCRETE':'REAL'};\n${n} =`)
-      .replace(/([\w.]+)\s*([+-])=\s*([^;]+);/g,'$1 = $1 $2 ($3);').replace(/\btrue\b/g,'1').replace(/\bfalse\b/g,'0');
-    return warn+c.replace(/\u0003(\d+)\u0003/g,(m,i)=>cm[i]);
+
+  // Add ArchestrA 'Me.' qualifier without breaking keywords, methods, strings, or numbers
+  toSP(code, lang) {
+    if (!code) return '';
+    lang = lang || TagTools._lang(code);
+    const tags = (typeof Sim !== 'undefined' && Sim.analyze) ? Sim.analyze(code, lang).tags : [];
+    const keep = [];
+    const placeholder = (x) => '\u0003' + (keep.push(x) - 1) + '\u0003';
+
+    // Mask string literals, comments, and existing Me. references
+    let c = code
+      .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, placeholder)
+      .replace(/\/\/.*/g, placeholder)
+      .replace(/\/\*[\s\S]*?\*\//g, placeholder);
+
+    if (lang === 'qs') {
+      c = c.replace(/\{[\s\S]*?\}/g, placeholder);
+    }
+
+    [...tags]
+      .sort((a, b) => b.length - a.length)
+      .forEach((t) => {
+        // Only target bare identifiers (not preceded by Me., Math., System., or a dot)
+        const re = new RegExp('(?<![\\w."#])(?<!Me\\.)' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
+        c = c.replace(re, 'Me.' + t);
+      });
+
+    return c.replace(/\u0003(\d+)\u0003/g, (m, i) => keep[i]);
+  },
+
+  // Strip ArchestrA 'Me.' for InTouch Flat Tag Dictionary
+  toInTouch(code) {
+    if (!code) return '';
+    return code.replace(/(?<![\w.])Me\./g, '');
+  },
+
+  // InTouch QuickScript -> ArchestrA C#
+  qsToCs(code) {
+    if (!code) return '';
+    const comments = [];
+    const placeholder = (x) => '\u0003' + (comments.push(x) - 1) + '\u0003';
+
+    // Helper to convert conditional expressions
+    const convertCond = (str) =>
+      str
+        .replace(/<>/g, '!=')
+        .replace(/\bAND\b/gi, '&&')
+        .replace(/\bOR\b/gi, '||')
+        .replace(/\bNOT\b/gi, '!')
+        .replace(/(?<![<>!=:])=(?!=)/g, '==');
+
+    // 1. Preserve comments and transform them into C# format
+    let c = code.replace(/\{([\s\S]*?)\}/g, (m, x) => {
+      const lines = x.split('\n').map((l) => '// ' + l.trim());
+      return placeholder(lines.join('\n'));
+    });
+
+    // 2. Syntax replacements
+    c = c
+      .replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi, (m, x) => 'if (' + convertCond(x.trim()) + ') {')
+      .replace(/\bELSE\b/gi, '} else {')
+      .replace(/\bENDIF\b\s*;?/gi, '}')
+      .replace(/:=/g, '=')
+      .replace(/<>/g, '!=')
+      .replace(/\bAND\b/gi, '&&')
+      .replace(/\bOR\b/gi, '||')
+      .replace(/\bNOT\b/gi, '!')
+      .replace(/\bDIM\s+(\w+)\s+AS\s+(\w+)\s*;/gi, (m, n, t) => {
+        const types = { INTEGER: 'int', REAL: 'double', DISCRETE: 'bool', MESSAGE: 'string' };
+        return (types[t.toUpperCase()] || 'double') + ' ' + n + ';';
+      });
+
+    // 3. Prefix with Me.
+    const tags = (typeof Sim !== 'undefined' && Sim.analyze) ? Sim.analyze(code, 'qs').tags : [];
+    [...tags]
+      .sort((a, b) => b.length - a.length)
+      .forEach((t) => {
+        const re = new RegExp('(?<![\\w."#])(?<!Me\\.)' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
+        c = c.replace(re, 'Me.' + t);
+      });
+
+    return c.replace(/\u0003(\d+)\u0003/g, (m, i) => comments[i]);
+  },
+
+  // ArchestrA C# -> InTouch QuickScript
+  csToQs(code) {
+    if (!code) return '';
+    const comments = [];
+    const placeholder = (x) => '\u0003' + (comments.push(x) - 1) + '\u0003';
+
+    const convertCond = (str) =>
+      str
+        .replace(/&&/g, ' AND ')
+        .replace(/\|\|/g, ' OR ')
+        .replace(/!=/g, ' <> ')
+        .replace(/!(?!=)/g, ' NOT ')
+        .replace(/==/g, ' = ');
+
+    // 1. Strip Me. and preserve comments into { comment } format
+    let c = code
+      .replace(/\bMe\./g, '')
+      .replace(/\/\/(.*)$/gm, (m, x) => placeholder('{ ' + x.trim() + ' }'))
+      .replace(/\/\*([\s\S]*?)\*\//g, (m, x) => placeholder('{ ' + x.trim() + ' }'));
+
+    const warn = /Math\.|\?[^:\n]*:/.test(c) 
+      ? '{ NOTE: Math functions and ternary (? :) operators require manual QuickScript adjustment }\n' 
+      : '';
+
+    // 2. Syntax replacements
+    c = c
+      .replace(/\bif\s*\(([^)]+)\)\s*\{/gi, (m, x) => 'IF ' + convertCond(x.trim()) + ' THEN')
+      .replace(/\}\s*else\s*\{/gi, 'ELSE')
+      .replace(/\}/g, 'ENDIF;')
+      .replace(/\b(double|float|int|bool|var)\s+(\w+)\s*=/gi, (m, t, n) => {
+        const qsType = t === 'int' ? 'INTEGER' : (t === 'bool' ? 'DISCRETE' : 'REAL');
+        return `DIM ${n} AS ${qsType};\n${n} =`;
+      })
+      .replace(/([\w.]+)\s*([+-])=\s*([^;]+);/g, '$1 = $1 $2 ($3);')
+      .replace(/\btrue\b/gi, '1')
+      .replace(/\bfalse\b/gi, '0');
+
+    c = convertCond(c);
+
+    // Clean up redundant double-ENDIFs from nested block cleanup
+    c = c.replace(/ELSE\s+ENDIF;/g, 'ELSE');
+
+    return warn + c.replace(/\u0003(\d+)\u0003/g, (m, i) => comments[i]);
   }
 };
 
-// ---- PLC exporter: QuickScript / ArchestrA C# -> Siemens SCL, Rockwell ST, Modbus CSV ----
-const PLC=(()=>{
-  const TY={BOOL:'Bool',REAL:'Real',DINT:'DInt'},D={INTEGER:'DINT',REAL:'REAL',DISCRETE:'BOOL'};
-  const kind=t=>tagKind(t)==='digital'?'BOOL':'REAL',nm=t=>t.replace(/\./g,'_');
-  function body(code,lang,tgt,a){
-    const cm=[],loc={},warn=new Set,save=s=>'\u0003'+(cm.push(s)-1)+'\u0003';
-    let c=code;if(lang==='qs')c=c.replace(/\{([^}]*)\}/g,(m,x)=>save('(*'+x+'*)'));
-    c=c.replace(/\/\/.*/g,save).replace(/\bMe\./g,'');
-    c=c.replace(/([\w.]+)\s*(\+?=)\s*([^?;]+?)\?([^:;]+):([^;]+);/g,'IF $3 THEN $1 $2 $4; ELSE $1 $2 $5; ENDIF;');
-    c=c.replace(/\b(double|int|bool|float|var)\s+(\w+)\s*=/g,(m,t,n)=>{loc[n]=t==='bool'?'BOOL':'REAL';return n+' ='})
-       .replace(/\bDIM\s+(\w+)\s+AS\s+(\w+)\s*;?/gi,(m,n,t)=>{loc[n]=D[t.toUpperCase()]||'REAL';return ''});
-    if(lang==='cs')c=c.replace(/\bif\s*\(([^\n]*)\)\s*\{/g,'IF $1 THEN').replace(/\}\s*else\s*\{/g,'ELSE').replace(/\}/g,'END_IF;').replace(/\btrue\b/g,'TRUE').replace(/\bfalse\b/g,'FALSE');
-    c=c.replace(/\bENDIF\b/gi,'END_IF').replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi,(m,x)=>'IF'+x.replace(/==|(?<![<>!=:])=(?!=)/g,'\u0001')+'THEN')
-       .replace(/&&/g,' AND ').replace(/\|\|/g,' OR ').replace(/!=/g,'<>').replace(/!(?!=)/g,'NOT ')
-       .replace(/([\w.]+)\s*([+-])=\s*([^;]+);/g,'$1 := $1 $2 ($3);').replace(/==/g,'\u0001').replace(/(?<![<>:=])=(?!=)/g,':=').replace(/\u0001/g,'=');
-    c=c.replace(/Math\.PI\b/g,'3.14159265').replace(/Math\.Pow\(([^,]+),([^)]+)\)/g,tgt==='scl'?'EXPT($1,$2)':'(($1) ** ($2))')
-       .replace(/Math\.(Max|Min|Abs)\(/g,(m,f)=>{if(tgt==='st'&&f!=='Abs')warn.add('MAX/MIN: use LIM/compare logic in Logix');return f.toUpperCase()+'('});
-    [...a.tags].sort((x,y)=>y.length-x.length).forEach(t=>{c=c.replace(new RegExp('(?<![\\w."#])'+t.replace(/\./g,'\\.')+'(?!\\w)','g'),tgt==='scl'?'#'+nm(t):t)});
-    if(tgt==='scl')Object.keys(loc).forEach(n=>{c=c.replace(new RegExp('(?<![\\w#])'+n+'(?!\\w)','g'),'#'+n)});
-    (c.match(/Math\.\w+/g)||[]).forEach(m=>warn.add(m+' has no direct equivalent'));
-    return {text:c.replace(/\u0003(\d+)\u0003/g,(m,i)=>cm[i]).replace(/^\s*\n/gm,'').trim(),loc,warn:[...warn]};
+// ---- Industrial PLC Exporter: SCL (TIA Portal), Rockwell ST, Modbus CSV ----
+const PLC = (() => {
+  const TY = { BOOL: 'Bool', REAL: 'Real', DINT: 'DInt' };
+  const D = { INTEGER: 'DINT', REAL: 'REAL', DISCRETE: 'BOOL' };
+  
+  const kind = (t) => {
+    if (typeof tagKind === 'function') {
+      const k = tagKind(t);
+      return (k === 'digital' || k === 'Discrete') ? 'BOOL' : (k === 'Integer' ? 'DINT' : 'REAL');
+    }
+    return /(Alarm|Trip|Fault|Interlock|\.Sw$|_Sw$|Slip|Fb$|Cmd|Close|Open|Run)/i.test(t) ? 'BOOL' : 'REAL';
+  };
+
+  const nm = (t) => t.replace(/\./g, '_').replace(/^Me_/i, '');
+
+  function body(code, lang, tgt, a) {
+    const comments = [];
+    const loc = {};
+    const warn = new Set();
+    const save = (s) => '\u0003' + (comments.push(s) - 1) + '\u0003';
+
+    let c = code;
+    if (lang === 'qs') {
+      c = c.replace(/\{([\s\S]*?)\}/g, (m, x) => save('(* ' + x.trim() + ' *)'));
+    }
+    c = c.replace(/\/\/.*/g, save).replace(/\/\*[\s\S]*?\*\//g, save).replace(/\bMe\./g, '');
+
+    // Convert Ternary conditionals: var = cond ? val1 : val2; -> IF-THEN-ELSE
+    c = c.replace(/([\w.]+)\s*(\+?=)\s*([^?;]+?)\s*\?\s*([^:;]+)\s*:\s*([^;]+);/g, 'IF $3 THEN\n    $1 $2 $4;\nELSE\n    $1 $2 $5;\nENDIF;');
+
+    // Variable declarations
+    c = c
+      .replace(/\b(double|float|var)\s+(\w+)\s*=/g, (m, t, n) => { loc[n] = 'REAL'; return n + ' :='; })
+      .replace(/\bint\s+(\w+)\s*=/g, (m, n) => { loc[n] = 'DINT'; return n + ' :='; })
+      .replace(/\bbool\s+(\w+)\s*=/g, (m, n) => { loc[n] = 'BOOL'; return n + ' :='; })
+      .replace(/\bDIM\s+(\w+)\s+AS\s+(\w+)\s*;?/gi, (m, n, t) => { loc[n] = D[t.toUpperCase()] || 'REAL'; return ''; });
+
+    // Conditional statements
+    if (lang === 'cs') {
+      c = c
+        .replace(/\bif\s*\(([^)]+)\)\s*\{/g, 'IF $1 THEN')
+        .replace(/\}\s*else\s*\{/g, 'ELSE')
+        .replace(/\}/g, 'END_IF;')
+        .replace(/\btrue\b/gi, 'TRUE')
+        .replace(/\bfalse\b/gi, 'FALSE');
+    }
+
+    c = c
+      .replace(/\bENDIF\b\s*;?/gi, 'END_IF;')
+      .replace(/\bIF\b([\s\S]*?)\bTHEN\b/gi, (m, x) => 'IF ' + x.replace(/==|(?<![<>!=:])=(?!=)/g, '\u0001') + ' THEN')
+      .replace(/&&/g, ' AND ')
+      .replace(/\|\|/g, ' OR ')
+      .replace(/!=/g, ' <> ')
+      .replace(/!(?!=)/g, ' NOT ')
+      .replace(/([\w.]+)\s*([+-])=\s*([^;]+);/g, '$1 := $1 $2 ($3);')
+      .replace(/==/g, '\u0001')
+      .replace(/(?<![<>:=])=(?!=)/g, ':=')
+      .replace(/\u0001/g, '=');
+
+    // Math replacements
+    c = c
+      .replace(/Math\.PI\b/g, '3.14159265')
+      .replace(/Math\.Pow\(([^,]+),([^)]+)\)/g, tgt === 'scl' ? 'EXPT($1, $2)' : '(($1) ** ($2))')
+      .replace(/Math\.(Max|Min|Abs)\(/g, (m, f) => {
+        if (tgt === 'st' && f !== 'Abs') warn.add('Rockwell ST: Use LIM or inline CMP logic for MAX/MIN');
+        return f.toUpperCase() + '(';
+      });
+
+    // Prefix tags with '#' in Siemens SCL local block interface
+    [...a.tags]
+      .sort((x, y) => y.length - x.length)
+      .forEach((t) => {
+        const re = new RegExp('(?<![\\w."#])' + t.replace(/\./g, '\\.') + '(?!\\w)', 'g');
+        c = c.replace(re, tgt === 'scl' ? '#' + nm(t) : nm(t));
+      });
+
+    if (tgt === 'scl') {
+      Object.keys(loc).forEach((n) => {
+        c = c.replace(new RegExp('(?<![\\w#])' + n + '(?!\\w)', 'g'), '#' + n);
+      });
+    }
+
+    (c.match(/Math\.\w+/g) || []).forEach((m) => warn.add(`${m} has no direct PLC instruction`));
+
+    return {
+      text: c.replace(/\u0003(\d+)\u0003/g, (m, i) => comments[i]).replace(/^\s*\n/gm, '').trim(),
+      loc,
+      warn: [...warn]
+    };
   }
-  function csv(a){
-    let coil=1,di=10001,ir=30001,hr=40001;const rows=[['Tag','ArchestrA','Direction','DataType','Table','ModbusAddress','Offset','Registers','Scaling','Note']];
-    a.tags.forEach(t=>{const o=a.outputs.has(t),d=kind(t)==='BOOL';let tb,ad,n;
-      if(d){tb=o?'Coil':'Discrete Input';ad=o?coil++:di++;n=1}else{tb=o?'Holding Register':'Input Register';n=2;ad=o?hr:ir;if(o)hr+=2;else ir+=2}
-      rows.push([t,'Me.'+t,o?'Output (PLC->SCADA)':'Input (SCADA->PLC)',d?'BOOL':'FLOAT32',tb,ad,ad-({'Coil':1,'Discrete Input':10001,'Input Register':30001,'Holding Register':40001})[tb],n,d?'':'1.0 (word order CDAB/ABCD per PLC)',''])});
-    return rows.map(r=>r.map(x=>/[,"]/.test(x)?'"'+String(x).replace(/"/g,'""')+'"':x).join(',')).join('\n');
+
+  function csv(a) {
+    let coil = 1, di = 10001, ir = 30001, hr = 40001;
+    const rows = [
+      ['Tag Name', 'ArchestrA Attribute', 'Direction', 'Data Type', 'Modbus Table', 'Address', 'Zero-Based Offset', 'Length (Words)', 'Byte Order / Scaling']
+    ];
+
+    a.tags.forEach((t) => {
+      const isOut = a.outputs.has(t);
+      const isBool = kind(t) === 'BOOL';
+      let table, addr, words;
+
+      if (isBool) {
+        table = isOut ? 'Coil (0x)' : 'Discrete Input (1x)';
+        addr = isOut ? coil++ : di++;
+        words = 1;
+      } else {
+        table = isOut ? 'Holding Register (4x)' : 'Input Register (3x)';
+        words = 2;
+        addr = isOut ? hr : ir;
+        if (isOut) hr += 2; else ir += 2;
+      }
+
+      const offset = addr - ({ 'Coil (0x)': 1, 'Discrete Input (1x)': 10001, 'Input Register (3x)': 30001, 'Holding Register (4x)': 40001 }[table]);
+
+      rows.push([
+        nm(t),
+        'Me.' + t,
+        isOut ? 'Output (PLC to SCADA)' : 'Input (SCADA to PLC)',
+        isBool ? 'BOOL' : 'FLOAT32 (Real)',
+        table,
+        addr,
+        offset,
+        words,
+        isBool ? 'Standard Bit' : 'CDAB (Word Swapped)'
+      ]);
+    });
+
+    return rows.map((r) => r.map((x) => (/[",\n]/.test(x) ? '"' + String(x).replace(/"/g, '""') + '"' : x)).join(',')).join('\n');
   }
-  function convert(code,lang,tgt){
-    if(lang==='sql')return {text:'-- SQL cannot be exported to a PLC.',ext:'txt',mime:'text/plain'};
-    const a=Sim.analyze(code,lang);
-    if(tgt==='csv')return {text:csv(a),ext:'csv',mime:'text/csv'};
-    const b=body(code,lang,tgt,a),dec=(arr,f)=>arr.map(f).join('\n'),ins=a.tags.filter(t=>!a.outputs.has(t)),outs=a.tags.filter(t=>a.outputs.has(t));
-    const rev=`(* REVIEW before download: BOOL vs 0/1 literals, scan time (1 s assumed), units.${b.warn.length?' '+b.warn.join('; ')+'.':''} *)`;
-    if(tgt==='scl')return {ext:'scl',mime:'text/plain',text:`(* WonderCode export: SCL for TIA Portal (S7-1200/1500/400FH) *)\n${rev}\nFUNCTION_BLOCK "FB_WonderCode"\nVAR_INPUT\n${dec(ins,t=>`  ${nm(t)} : ${TY[kind(t)]};`)}\nEND_VAR\nVAR_OUTPUT\n${dec(outs,t=>`  ${nm(t)} : ${TY[kind(t)]};`)}\nEND_VAR\nVAR_TEMP\n${dec(Object.keys(b.loc),n=>`  ${n} : ${TY[b.loc[n]]};`)}\nEND_VAR\nBEGIN\n${b.text}\nEND_FUNCTION_BLOCK`};
-    return {ext:'st',mime:'text/plain',text:`(* WonderCode export: Studio 5000 Structured Text routine *)\n${rev}\n(* Create these tags (dotted names = UDT members): *)\n${dec(a.tags,t=>`//   ${t} : ${kind(t)}  (${a.outputs.has(t)?'output':'input'})`)}\n${dec(Object.keys(b.loc),n=>`//   ${n} : ${b.loc[n]}  (local)`)}\n\n${b.text}`};
+
+  function convert(code, lang, tgt) {
+    if (lang === 'sql') {
+      return { text: '-- Historian SQL cannot be compiled to PLC logic.\n-- Use QuickScript or C# to export PLC blocks.', ext: 'txt', mime: 'text/plain' };
+    }
+
+    const a = (typeof Sim !== 'undefined' && Sim.analyze) ? Sim.analyze(code, lang) : { tags: [], outputs: new Set() };
+
+    if (tgt === 'csv') {
+      return { text: csv(a), ext: 'csv', mime: 'text/csv' };
+    }
+
+    const b = body(code, lang, tgt, a);
+    const dec = (arr, fn) => arr.map(fn).join('\n');
+    const ins = a.tags.filter((t) => !a.outputs.has(t));
+    const outs = a.tags.filter((t) => a.outputs.has(t));
+
+    const warnBlock = b.warn.length ? `\n// WARNING: ${b.warn.join('; ')}\n` : '';
+
+    if (tgt === 'scl') {
+      return {
+        ext: 'scl',
+        mime: 'text/plain',
+        text: `(* =========================================================================
+   WonderCode Export: Siemens TIA Portal SCL (S7-1200 / S7-1500)
+   Generated on ${new Date().toLocaleDateString()}
+   ========================================================================= *)${warnBlock}
+FUNCTION_BLOCK "FB_WonderCode_Logic"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+VAR_INPUT
+${dec(ins, (t) => `    ${nm(t)} : ${TY[kind(t)]}; // Process Input`)}
+END_VAR
+VAR_OUTPUT
+${dec(outs, (t) => `    ${nm(t)} : ${TY[kind(t)]}; // Process Output / Actuator`)}
+END_VAR
+VAR_TEMP
+${dec(Object.keys(b.loc), (n) => `    ${n} : ${TY[b.loc[n]]}; // Internal Calculation Temp`)}
+END_VAR
+
+BEGIN
+${b.text}
+END_FUNCTION_BLOCK`
+      };
+    }
+
+    // Rockwell Studio 5000 Structured Text
+    return {
+      ext: 'st',
+      mime: 'text/plain',
+      text: `(* =========================================================================
+   WonderCode Export: Rockwell Studio 5000 Logix Designer (Structured Text)
+   Generated on ${new Date().toLocaleDateString()}
+   ========================================================================= *)${warnBlock}
+// --- REQUIRED CONTROLLER TAGS ---
+// Inputs:
+${dec(ins, (t) => `//   ${nm(t)} : ${kind(t)} (Controller Tag - Input)`)}
+// Outputs:
+${dec(outs, (t) => `//   ${nm(t)} : ${kind(t)} (Controller Tag - Output)`)}
+${Object.keys(b.loc).length ? '// Locals:\n' + dec(Object.keys(b.loc), (n) => `//   ${n} : ${b.loc[n]} (Routine Local)`) : ''}
+
+// --- LOGIC ROUTINE ---
+${b.text}`
+    };
   }
-  return {convert};
+
+  return { convert };
 })();
 
-// ---- Converter map for the language dropdown: every pair (key = from + to) ----
-(function(){
-  const sqlTags=c=>[...new Set((c.match(/'([\w.]+)'/g)||[]).map(x=>x.slice(1,-1)))];
-  const toSql=(tags,src)=>tags.length?`-- Generated from ${src} tags (last 24 h)\nSELECT DateTime, TagName, Value\nFROM History\nWHERE TagName IN (${tags.map(t=>`'${t}'`).join(', ')})\n  AND DateTime >= DATEADD(hh,-24,GETDATE())\nORDER BY DateTime;\n`:`-- No tags found in the ${src} code.\n`;
-  const hist=t=>'Hist_'+t.replace(/\./g,'_');
-  const same=c=>c;
-  TagTools.CV={
-    qsqs:same,cscs:same,sqlsql:same,
-    qscs:c=>TagTools.qsToCs(c),
-    csqs:c=>TagTools.csToQs(c),
-    qssql:c=>toSql(Sim.analyze(c,'qs').tags,'QuickScript'),
-    cssql:c=>toSql(Sim.analyze(c,'cs').tags,'ArchestrA C#'),
-    sqlqs:c=>{const t=sqlTags(c);return t.length?`{ Generated from Historian SQL tag list }\n${t.map(x=>`${hist(x)} = ${x};`).join('\n')}\n`:'{ No quoted tag names found in the SQL. }\n'},
-    sqlcs:c=>{const t=sqlTags(c);return t.length?`// Generated from Historian SQL tag list\n${t.map(x=>`Me.${hist(x)} = Me.${x};`).join('\n')}\n`:'// No quoted tag names found in the SQL.\n'}
+// ---- Language Switcher Handlers ----
+(function () {
+  const sqlTags = (c) => [...new Set((c.match(/'([\w.]+)'/g) || []).map((x) => x.slice(1, -1)))];
+
+  const toSql = (tags, src) =>
+    tags.length
+      ? `-- Generated Historian Query for ${src} tags\nSELECT DateTime, TagName, Value, Quality\nFROM History\nWHERE TagName IN (${tags.map((t) => `'${t}'`).join(', ')})\n  AND DateTime >= DATEADD(hh, -24, GETDATE())\nORDER BY DateTime DESC;\n`
+      : `-- No tags identified in the ${src} editor to query.\n`;
+
+  const same = (c) => c;
+
+  TagTools.CV = {
+    qsqs: same,
+    cscs: same,
+    sqlsql: same,
+    qscs: (c) => TagTools.qsToCs(c),
+    csqs: (c) => TagTools.csToQs(c),
+    qssql: (c) => toSql((typeof Sim !== 'undefined' ? Sim.analyze(c, 'qs').tags : []), 'InTouch QuickScript'),
+    cssql: (c) => toSql((typeof Sim !== 'undefined' ? Sim.analyze(c, 'cs').tags : []), 'ArchestrA C#'),
+
+    // FIXED: Non-destructive tag query conversion.
+    // Instead of wiping out logic with mirror assignments, it leaves comments and inserts safe reference declarations.
+    sqlqs: (c) => {
+      const tags = sqlTags(c);
+      if (!tags.length) return '{ No quoted tag names found in SQL. }\n';
+      return `{ Reference tags extracted from Historian SQL }\n` +
+             tags.map((t) => `{ Tag: ${t} }`).join('\n') +
+             `\n\n{ Implement interlock or control logic below }\n`;
+    },
+
+    sqlcs: (c) => {
+      const tags = sqlTags(c);
+      if (!tags.length) return '// No quoted tag names found in SQL.\n';
+      return `// Reference tags extracted from Historian SQL\n` +
+             tags.map((t) => `// Tag: Me.${t}`).join('\n') +
+             `\n// Implement ArchestrA control logic below\n`;
+    }
   };
 })();
